@@ -1,0 +1,42 @@
+# Builds the app and uploads artifacts to a GitHub Release when a version tag is pushed.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# The tag should match the version in package.json. Artifacts land in a DRAFT release
+# (releaseType: draft in electron-builder.yml) so you can review/edit notes before publishing.
+#
+# v0: builds are UNSIGNED. CSC_IDENTITY_AUTO_DISCOVERY=false stops electron-builder from
+# trying to sign with any cert that happens to be on the runner.
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # required to create/upload the GitHub Release
+
+jobs:
+  build:
+    # macOS is the primary target and can only be built on a macOS runner.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Fail fast before the (slower) package step.
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Build + publish (universal, unsigned)
+        run: npm run release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'

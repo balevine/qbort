@@ -1,0 +1,54 @@
+# electron-builder configuration.
+# v0: UNSIGNED builds (no Apple Developer ID / Windows cert yet) and manual updates.
+appId: com.brianlevine.ticketgenerator
+productName: Ticket Generator
+copyright: Copyright © 2026 Brian Levine
+
+directories:
+  # electron-vite emits the app into out/; electron-builder bundles that.
+  output: release
+  buildResources: build
+
+# Only the built app + its manifest go into the package (no source, no node_modules dev deps).
+files:
+  - out/**/*
+  - package.json
+asar: true
+
+# --- macOS (primary target) -------------------------------------------------
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: universal # one artifact runs on Intel + Apple Silicon
+    - target: zip
+      arch: universal
+  # UNSIGNED: identity:null disables code signing so the build succeeds without a cert.
+  # Users bypass Gatekeeper on first launch (right-click → Open); see README installation.
+  identity: null
+  # Drop a 1024x1024 build/icon.png to brand the app; otherwise the default Electron icon is used.
+
+dmg:
+  title: ${productName} ${version}
+
+# --- Windows (unsigned; build on a Windows runner) --------------------------
+win:
+  target:
+    - target: nsis
+      arch: x64
+
+# --- Linux ------------------------------------------------------------------
+linux:
+  category: Utility
+  target:
+    - target: AppImage
+      arch: x64
+
+# --- Distribution -----------------------------------------------------------
+# electron-builder can upload artifacts straight to GitHub Releases with `--publish`.
+# Update owner/repo to match your GitHub remote. releaseType:draft lets you review before publishing.
+publish:
+  provider: github
+  owner: CHANGE_ME # your GitHub username or org
+  repo: ticket-generator
+  releaseType: draft

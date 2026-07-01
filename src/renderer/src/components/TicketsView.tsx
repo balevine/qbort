@@ -15,7 +15,7 @@ import { Stat } from '@/components/ui/stat'
 import { useTickets } from '@/state/TicketsContext'
 import { useToast } from '@/state/ToastContext'
 import { PAGE_SIZE, filterTickets, pageCount, pageOf, type StatusFilter } from '@/lib/tickets'
-import { errorMessage, formatCost, formatDuration, formatInt } from '@/lib/format'
+import { errorMessage, formatCost, formatDuration, formatInt, formatTicketId, formatTimestamp } from '@/lib/format'
 import { PROVIDER_LABELS, TICKET_STATUSES } from '@shared/types'
 
 export function TicketsView() {
@@ -140,11 +140,12 @@ export function TicketsView() {
 
       {/* Table */}
       <div className="brutal-box overflow-hidden">
-        <div className="grid grid-cols-[5.5rem_1fr_6rem_14rem] items-center gap-3 border-b-2 border-ink bg-ink px-4 py-2 font-mono text-[10px] font-bold uppercase tracking-widest text-paper">
+        <div className="grid grid-cols-[4.5rem_1fr_6rem_10.5rem_10rem] items-center gap-3 border-b-2 border-ink bg-ink px-4 py-2 font-mono text-[10px] font-bold uppercase tracking-widest text-paper">
           <span>ID</span>
           <span>Subject</span>
           <span>Status</span>
           <span>From</span>
+          <span>Created</span>
         </div>
         {pageItems.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-ink/50">
@@ -157,15 +158,18 @@ export function TicketsView() {
                 <button
                   type="button"
                   onClick={() => setSelectedIndex(page * PAGE_SIZE + i)}
-                  className="grid w-full grid-cols-[5.5rem_1fr_6rem_14rem] items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-ink/[0.05]"
+                  className="grid w-full grid-cols-[4.5rem_1fr_6rem_10.5rem_10rem] items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-ink/[0.05]"
                 >
-                  <span className="font-mono text-[11px] text-ink/50">{t.id}</span>
+                  <span className="font-mono text-[11px] text-ink/50">{formatTicketId(t.id)}</span>
                   <span className="truncate text-sm">{t.subject}</span>
                   <span className="w-fit border-2 border-ink px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest">
                     {t.status}
                   </span>
-                  <span className="truncate font-mono text-[11px] text-ink/60" title={t.from.email}>
-                    {t.from.name}
+                  <span className="truncate font-mono text-[11px] text-ink/60" title={t.messages[0]?.from.email}>
+                    {t.messages[0]?.from.name}
+                  </span>
+                  <span className="truncate font-mono text-[11px] text-ink/50">
+                    {t.messages[0] ? formatTimestamp(t.messages[0].createdAt) : '—'}
                   </span>
                 </button>
               </li>

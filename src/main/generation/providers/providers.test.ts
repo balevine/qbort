@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AnthropicProvider } from './anthropic'
-import { OpenAIProvider } from './openai'
-import { GeminiProvider } from './gemini'
 import { OllamaProvider } from './ollama'
 import { createProvider } from './index'
 import { ProviderError } from './types'
@@ -49,46 +47,6 @@ describe('AnthropicProvider', () => {
       retryable: true,
       status: 429
     })
-  })
-})
-
-describe('OpenAIProvider', () => {
-  it('uses json_object response format and parses choices/usage', async () => {
-    stubFetch(
-      () =>
-        new Response(
-          JSON.stringify({
-            choices: [{ message: { content: '{"tickets":[]}' } }],
-            usage: { prompt_tokens: 10, completion_tokens: 20 }
-          }),
-          { status: 200 }
-        )
-    )
-    const result = await new OpenAIProvider('sk-o', 'gpt-4.1-mini').generateBatch(args)
-    expect(lastCall.url).toContain('api.openai.com')
-    expect(lastCall.init?.headers).toMatchObject({ Authorization: 'Bearer sk-o' })
-    expect(body().response_format).toEqual({ type: 'json_object' })
-    expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 20 })
-  })
-})
-
-describe('GeminiProvider', () => {
-  it('puts the model + key in the URL and parses candidates/usage', async () => {
-    stubFetch(
-      () =>
-        new Response(
-          JSON.stringify({
-            candidates: [{ content: { parts: [{ text: '{"tickets":[]}' }] } }],
-            usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 8 }
-          }),
-          { status: 200 }
-        )
-    )
-    const result = await new GeminiProvider('g-key', 'gemini-2.5-flash').generateBatch(args)
-    expect(lastCall.url).toContain('models/gemini-2.5-flash:generateContent')
-    expect(lastCall.url).toContain('key=g-key')
-    expect(body().generationConfig.responseMimeType).toBe('application/json')
-    expect(result.usage).toEqual({ inputTokens: 5, outputTokens: 8 })
   })
 })
 

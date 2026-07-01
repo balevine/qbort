@@ -2,21 +2,26 @@ import { describe, expect, it } from 'vitest'
 import { filterTickets, pageCount, pageOf } from './tickets'
 import type { Ticket } from '@shared/types'
 
-function ticket(id: string, subject: string, status: Ticket['status'], name: string): Ticket {
+function ticket(id: number, subject: string, status: Ticket['status'], name: string): Ticket {
   return {
     id,
     subject,
-    body: `body of ${subject}`,
     status,
-    from: { name, email: `${name.toLowerCase()}@acme.example` },
-    responses: []
+    messages: [
+      {
+        from: { name, email: `${name.toLowerCase()}@acme.example` },
+        body: `body of ${subject}`,
+        isStaff: false,
+        createdAt: '2026-06-30T00:00:00.000Z'
+      }
+    ]
   }
 }
 
 const tickets: Ticket[] = [
-  ticket('T-00001', 'Login broken', 'open', 'Dana'),
-  ticket('T-00002', 'Refund request', 'closed', 'Priya'),
-  ticket('T-00003', 'Login slow', 'open', 'Marco')
+  ticket(1, 'Login broken', 'open', 'Dana'),
+  ticket(2, 'Refund request', 'closed', 'Priya'),
+  ticket(3, 'Login slow', 'open', 'Marco')
 ]
 
 describe('filterTickets', () => {
@@ -27,18 +32,16 @@ describe('filterTickets', () => {
 
   it('filters by status', () => {
     expect(filterTickets(tickets, { status: 'open' })).toHaveLength(2)
-    expect(filterTickets(tickets, { status: 'closed' }).map((t) => t.id)).toEqual(['T-00002'])
+    expect(filterTickets(tickets, { status: 'closed' }).map((t) => t.id)).toEqual([2])
   })
 
   it('matches the query across subject and customer name', () => {
     expect(filterTickets(tickets, { query: 'login' })).toHaveLength(2)
-    expect(filterTickets(tickets, { query: 'priya' }).map((t) => t.id)).toEqual(['T-00002'])
+    expect(filterTickets(tickets, { query: 'priya' }).map((t) => t.id)).toEqual([2])
   })
 
   it('combines status and query', () => {
-    expect(filterTickets(tickets, { status: 'open', query: 'slow' }).map((t) => t.id)).toEqual([
-      'T-00003'
-    ])
+    expect(filterTickets(tickets, { status: 'open', query: 'slow' }).map((t) => t.id)).toEqual([3])
   })
 })
 

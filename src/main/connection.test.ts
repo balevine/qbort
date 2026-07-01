@@ -51,14 +51,14 @@ describe('testConnection', () => {
 
   it('reports unauthorized on a 401 from a hosted provider', async () => {
     stubFetch(() => new Response('unauthorized', { status: 401 }))
-    const res = await testConnection('openai', { getKey: getKey('bad-key') })
+    const res = await testConnection('anthropic', { getKey: getKey('bad-key') })
     expect(res.ok).toBe(false)
     expect(res.message).toMatch(/unauthorized/i)
   })
 
   it('reports success on a 200 from a hosted provider', async () => {
     stubFetch(() => new Response(JSON.stringify({ data: [] }), { status: 200 }))
-    const res = await testConnection('gemini', { getKey: getKey('good-key') })
+    const res = await testConnection('anthropic', { getKey: getKey('good-key') })
     expect(res.ok).toBe(true)
   })
 })

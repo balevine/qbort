@@ -6,9 +6,6 @@ import { IpcChannels, type GenerationProgress, type IpcApi, type ProviderId } fr
  * Electron is reachable from the renderer (contextIsolation + sandbox are on).
  */
 const api: IpcApi = {
-  app: {
-    getInfo: () => ipcRenderer.invoke(IpcChannels.appGetInfo)
-  },
   settings: {
     get: () => ipcRenderer.invoke(IpcChannels.settingsGet),
     set: (partial) => ipcRenderer.invoke(IpcChannels.settingsSet, partial)

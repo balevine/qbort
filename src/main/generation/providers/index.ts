@@ -2,8 +2,6 @@ import type { ProviderId, Settings } from '@shared/types'
 import { ProviderError, type LLMProvider } from './types'
 import { getModelId } from './models'
 import { AnthropicProvider } from './anthropic'
-import { OpenAIProvider } from './openai'
-import { GeminiProvider } from './gemini'
 import { OllamaProvider } from './ollama'
 
 export * from './types'
@@ -34,15 +32,5 @@ export async function createProvider(
   const key = await getKey(id)
   if (!key) throw new ProviderError(`No API key saved for ${id}. Add one in Settings.`, id)
 
-  const model = getModelId(id)
-  switch (id) {
-    case 'anthropic':
-      return new AnthropicProvider(key, model)
-    case 'openai':
-      return new OpenAIProvider(key, model)
-    case 'gemini':
-      return new GeminiProvider(key, model)
-    default:
-      throw new ProviderError(`Unsupported provider: ${id}`, id)
-  }
+  return new AnthropicProvider(key, getModelId(id))
 }

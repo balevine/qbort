@@ -20,18 +20,10 @@ export interface ModelInfo {
  * ⚠️ Model IDs and pricing must be VERIFIED against each provider's current catalog — they
  * drift over time. This map is the single place to update them.
  */
-export const HOSTED_MODELS: Record<'anthropic' | 'openai' | 'gemini', ModelInfo> = {
+export const HOSTED_MODELS: Record<'anthropic', ModelInfo> = {
   anthropic: {
     model: 'claude-sonnet-4-6',
     pricing: { inputPerM: 3.0, outputPerM: 15.0, currency: 'USD' }
-  },
-  openai: {
-    model: 'gpt-4.1-mini',
-    pricing: { inputPerM: 0.4, outputPerM: 1.6, currency: 'USD' }
-  },
-  gemini: {
-    model: 'gemini-2.5-flash',
-    pricing: { inputPerM: 0.3, outputPerM: 2.5, currency: 'USD' }
   }
 }
 
@@ -39,7 +31,7 @@ export const HOSTED_MODELS: Record<'anthropic' | 'openai' | 'gemini', ModelInfo>
 export const LOCAL_PRICING: ModelPricing = { inputPerM: 0, outputPerM: 0, currency: 'USD' }
 
 /** The chosen model id for a hosted provider. */
-export function getModelId(provider: 'anthropic' | 'openai' | 'gemini'): string {
+export function getModelId(provider: 'anthropic'): string {
   return HOSTED_MODELS[provider].model
 }
 

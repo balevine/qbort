@@ -24,14 +24,21 @@ describe('withDefaults', () => {
   it('preserves valid values', () => {
     const s = withDefaults({
       providerId: 'anthropic',
-      generation: { numTickets: 250, includeStaffResponses: true, avgStaffResponses: 3, numStaffMembers: 12 }
+      generation: {
+        numTickets: 250,
+        includeStaffResponses: true,
+        avgStaffResponses: 3,
+        numStaffMembers: 12,
+        maxTicketAgeDays: 30
+      }
     })
     expect(s.providerId).toBe('anthropic')
     expect(s.generation).toEqual({
       numTickets: 250,
       includeStaffResponses: true,
       avgStaffResponses: 3,
-      numStaffMembers: 12
+      numStaffMembers: 12,
+      maxTicketAgeDays: 30
     })
   })
 
@@ -44,8 +51,8 @@ describe('withDefaults', () => {
 
 describe('mergeSettings', () => {
   it('overlays a partial update and re-applies defaults/clamping', () => {
-    const merged = mergeSettings(DEFAULT_SETTINGS, { providerId: 'openai' })
-    expect(merged.providerId).toBe('openai')
+    const merged = mergeSettings(DEFAULT_SETTINGS, { providerId: 'anthropic' })
+    expect(merged.providerId).toBe('anthropic')
     expect(merged.generation).toEqual(DEFAULT_SETTINGS.generation)
   })
 })

@@ -4,12 +4,21 @@ import {
   TICKET_STATUSES,
   type Ticket,
   type TicketAuthor,
-  type TicketResponse,
+  type TicketMessage,
   type TicketStatus
 } from '@shared/types'
+import { isStaffEmail } from '@shared/staff'
+import { messageTimestamps } from '@shared/time'
 
-/** A ticket before the app assigns its id. */
-export type DraftTicket = Omit<Ticket, 'id'>
+/** A message before the app assigns its `createdAt`. */
+export type DraftMessage = Omit<TicketMessage, 'createdAt'>
+
+/** A ticket before the app assigns its id and message timestamps. */
+export interface DraftTicket {
+  subject: string
+  status: TicketStatus
+  messages: DraftMessage[]
+}
 
 // Permissive raw schema — the model's output is messy, so we validate loosely then repair.
 const RawAuthorSchema = z
@@ -39,6 +48,14 @@ export interface ValidateResult {
   dropped: number
 }
 
+/** Run-level context for assigning message timestamps. */
+export interface TimeContext {
+  nowMs: number
+  rng: () => number
+  /** Opening timestamp (ms) for a ticket of the given id; monotonic in id across the run. */
+  openingMsForId: (id: number) => number
+}
+
 function coerceStatus(raw: string | undefined): TicketStatus {
   const s = (raw ?? '').trim().toLowerCase().replace(/\s+/g, '-')
   return (TICKET_STATUSES as readonly string[]).includes(s) ? (s as TicketStatus) : DEFAULT_TICKET_STATUS
@@ -51,32 +68,31 @@ function repairAuthor(raw: { name?: string; email?: string } | undefined): Ticke
   return { name, email }
 }
 
-function repairResponse(raw: z.infer<typeof RawResponseSchema>): TicketResponse | null {
+/** Repair one raw message into a draft (role derived from the email domain), or null to drop it. */
+function repairMessage(raw: { body?: string; from?: { name?: string; email?: string } }): DraftMessage | null {
   const body = (raw.body ?? '').trim()
   const from = repairAuthor(raw.from)
   if (!body || !from) return null
-  return { body, from }
+  return { from, body, isStaff: isStaffEmail(from.email) }
 }
 
-/** Repair one raw ticket into a valid draft, or return null to drop it. */
+/** Repair one raw ticket into a draft, or return null to drop it. */
 export function repairTicket(raw: unknown, opts: ValidateOptions): DraftTicket | null {
   const parsed = RawTicketSchema.safeParse(raw)
   if (!parsed.success) return null
   const t = parsed.data
 
-  const body = (t.body ?? '').trim()
-  if (!body) return null // a ticket with no content is useless
+  // The opening message is the customer's — a ticket needs its content + an author.
+  const opening = repairMessage({ body: t.body, from: t.from })
+  if (!opening) return null
 
-  const from = repairAuthor(t.from)
-  if (!from) return null // a ticket needs a customer with an email
+  const subject = (t.subject ?? '').trim() || opening.body.split('\n')[0].slice(0, 80) || '(no subject)'
 
-  const subject = (t.subject ?? '').trim() || body.split('\n')[0].slice(0, 80) || '(no subject)'
-
-  const responses: TicketResponse[] = opts.includeStaffResponses
-    ? (t.responses ?? []).map(repairResponse).filter((r): r is TicketResponse => r !== null)
+  const replies: DraftMessage[] = opts.includeStaffResponses
+    ? (t.responses ?? []).map(repairMessage).filter((m): m is DraftMessage => m !== null)
     : []
 
-  return { subject, body, status: coerceStatus(t.status), from, responses }
+  return { subject, status: coerceStatus(t.status), messages: [opening, ...replies] }
 }
 
 /** Extract the ticket array from a model response (object `{tickets:[...]}`, bare array, or JSON string). */
@@ -109,12 +125,20 @@ export function validateTickets(input: unknown, opts: ValidateOptions): Validate
   return { tickets, dropped }
 }
 
-/** Format a sequential ticket id, e.g. `T-00001`. */
-export function formatTicketId(n: number, prefix = 'T-'): string {
-  return `${prefix}${String(n).padStart(5, '0')}`
-}
-
-/** Assign sequential ids to drafts starting at `start` (1-based). */
-export function assignIds(drafts: DraftTicket[], start = 1, prefix = 'T-'): Ticket[] {
-  return drafts.map((d, i) => ({ id: formatTicketId(start + i, prefix), ...d }))
+/**
+ * Turn drafts into final tickets: assign sequential integer ids (from `start`) and synthesize
+ * ascending message timestamps. Each ticket's opening time comes from `openingMsForId`, which is
+ * ordered by id, so ascending ids get ascending open times.
+ */
+export function assembleTickets(drafts: DraftTicket[], start: number, time: TimeContext): Ticket[] {
+  return drafts.map((draft, i) => {
+    const id = start + i
+    const times = messageTimestamps(draft.messages.length, time.openingMsForId(id), time.nowMs, time.rng)
+    return {
+      id,
+      subject: draft.subject,
+      status: draft.status,
+      messages: draft.messages.map((m, j) => ({ ...m, createdAt: times[j] }))
+    }
+  })
 }

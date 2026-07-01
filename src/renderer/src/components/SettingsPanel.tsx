@@ -60,6 +60,15 @@ export function SettingsPanel() {
           })
         }
       />
+
+      <SliderField
+        label="Max ticket age (days)"
+        value={gen.maxTicketAgeDays}
+        min={LIMITS.maxTicketAgeDays.min}
+        max={LIMITS.maxTicketAgeDays.max}
+        hint="how far back message timestamps are spread"
+        onChange={(maxTicketAgeDays) => update({ generation: { ...gen, maxTicketAgeDays } })}
+      />
     </div>
   )
 }

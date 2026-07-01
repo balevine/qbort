@@ -78,16 +78,6 @@ function probeHosted(provider: ProviderId, key: string, signal: AbortSignal): Pr
         headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
         signal
       })
-    case 'openai':
-      return fetch('https://api.openai.com/v1/models', {
-        headers: { Authorization: `Bearer ${key}` },
-        signal
-      })
-    case 'gemini':
-      return fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`,
-        { signal }
-      )
     default:
       return Promise.reject(new Error(`Unknown hosted provider: ${provider}`))
   }

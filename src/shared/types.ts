@@ -5,24 +5,17 @@
  * model. Pure defaults/helpers live in `settings.ts` and `staff.ts`.
  */
 
-/** Basic app/runtime info surfaced to the renderer (proves the IPC bridge works). */
-export interface AppInfo {
-  name: string
-  version: string
-  platform: NodeJS.Platform
-  electron: string
-}
+/**
+ * Supported LLM providers. Ollama is local; Anthropic is hosted (needs an API key).
+ * (OpenAI and Gemini are intentionally out of scope for now — see the README.)
+ */
+export type ProviderId = 'ollama' | 'anthropic'
 
-/** Supported LLM providers. Ollama is local; the rest are hosted (need an API key). */
-export type ProviderId = 'ollama' | 'anthropic' | 'openai' | 'gemini'
-
-export const ALL_PROVIDERS: ProviderId[] = ['ollama', 'anthropic', 'openai', 'gemini']
-export const HOSTED_PROVIDERS: ProviderId[] = ['anthropic', 'openai', 'gemini']
+export const ALL_PROVIDERS: ProviderId[] = ['ollama', 'anthropic']
+export const HOSTED_PROVIDERS: ProviderId[] = ['anthropic']
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
   ollama: 'Ollama (local)',
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  gemini: 'Google Gemini'
+  anthropic: 'Anthropic'
 }
 
 export function isHostedProvider(id: ProviderId): boolean {
@@ -45,6 +38,8 @@ export interface GenerationSettings {
   avgStaffResponses: number
   /** Size of the staff roster. */
   numStaffMembers: number
+  /** Oldest a synthesized ticket can be, in days: message timestamps fall within this window. */
+  maxTicketAgeDays: number
 }
 
 export interface OllamaConfig {
@@ -70,26 +65,35 @@ export const TICKET_STATUSES = ['new', 'open', 'pending', 'on-hold', 'solved', '
 export type TicketStatus = (typeof TICKET_STATUSES)[number]
 export const DEFAULT_TICKET_STATUS: TicketStatus = 'open'
 
-/** Author of a ticket or response. Staff authors are on the company.biz domain. */
+/** Author of a message. Staff authors are on the company.biz domain. */
 export interface TicketAuthor {
   name: string
   email: string
 }
 
-/** A follow-up comment on a ticket (staff reply or customer follow-up). */
-export interface TicketResponse {
-  body: string
+/**
+ * One message in a ticket conversation. The first message is the customer's opening message;
+ * the rest are follow-ups (staff replies or customer follow-ups). `isStaff` and `createdAt`
+ * are assigned by the app, not trusted from the LLM.
+ */
+export interface TicketMessage {
   from: TicketAuthor
+  body: string
+  /** True when the author is a staff member (company.biz domain). */
+  isStaff: boolean
+  /** ISO 8601 timestamp; messages within a ticket are strictly increasing. */
+  createdAt: string
 }
 
-/** The flat output ticket. `id` is assigned by the app, not the LLM. */
+/**
+ * The output ticket. `id` (sequential integer) and every message's `isStaff`/`createdAt` are
+ * assigned by the app. All messages — including the customer's opening one — live in `messages`.
+ */
 export interface Ticket {
-  id: string
+  id: number
   subject: string
-  body: string
   status: TicketStatus
-  from: TicketAuthor
-  responses: TicketResponse[]
+  messages: TicketMessage[]
 }
 
 /** Pricing snapshot recorded with a run. */
@@ -178,9 +182,6 @@ export type SecretStatus = Record<string, boolean>
  * single, explicitly-allow-listed IPC channel handled in the main process.
  */
 export interface IpcApi {
-  app: {
-    getInfo: () => Promise<AppInfo>
-  }
   settings: {
     get: () => Promise<Settings>
     set: (partial: Partial<Settings>) => Promise<Settings>
@@ -225,7 +226,6 @@ export interface LoadedTickets {
 
 /** Channel name constants — keeps preload and main in sync without magic strings. */
 export const IpcChannels = {
-  appGetInfo: 'app:getInfo',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   secretsSetKey: 'secrets:setKey',

@@ -7,7 +7,8 @@ import {
 } from '@shared/generation'
 import { compilePromptParts } from '@shared/promptCompiler'
 import { ensureRoster, sampleResponseCounts } from '@shared/staff'
-import { assignIds, validateTickets } from './validate'
+import { openingTimesForRun } from '@shared/time'
+import { assembleTickets, validateTickets, type TimeContext } from './validate'
 import { ProviderError, type GenerateBatchResult, type LLMProvider } from './providers'
 
 /** Snapshot passed to `onBatchComplete` so the caller can persist incrementally. */
@@ -28,6 +29,8 @@ export interface RunGenerationDeps {
   concurrency?: number
   maxRetries?: number
   rng?: () => number
+  /** Reference "now" (ms) for synthesized message timestamps; defaults to Date.now(). */
+  now?: number
   /** Injectable (and abortable) sleep so backoff is testable. */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
 }
@@ -116,11 +119,21 @@ export async function runGeneration(deps: RunGenerationDeps): Promise<RunGenerat
   const maxRetries = deps.maxRetries ?? 6
   const rng = deps.rng ?? Math.random
   const sleep = deps.sleep ?? abortableSleep
+  const nowMs = deps.now ?? Date.now()
 
   const gen = settings.generation
   const total = Math.max(0, gen.numTickets)
   const roster = ensureRoster(settings.staffRoster, gen.numStaffMembers)
   const tokensPerTicket = estimatedTokensPerTicket(gen.includeStaffResponses, gen.avgStaffResponses)
+
+  // Pre-pick sorted opening times for the whole run and hand them out by id, so a ticket's
+  // creation time rises with its id (ids beyond the requested count fall back to "now").
+  const openingTimes = openingTimesForRun(total, gen.maxTicketAgeDays, nowMs, rng)
+  const timeCtx: TimeContext = {
+    nowMs,
+    rng,
+    openingMsForId: (id) => openingTimes[id - 1] ?? nowMs
+  }
 
   // Shrink batches when staff responses make each ticket large, so a batch's expected output
   // fits the model's budget and doesn't get truncated (which would drop the whole batch).
@@ -215,7 +228,7 @@ export async function runGeneration(deps: RunGenerationDeps): Promise<RunGenerat
 
       const validated = validateTickets(raw, { includeStaffResponses: gen.includeStaffResponses })
       dropped += validated.dropped
-      const assigned = assignIds(validated.tickets, nextId)
+      const assigned = assembleTickets(validated.tickets, nextId, timeCtx)
       nextId += assigned.length
       tickets.push(...assigned)
     } catch (err) {

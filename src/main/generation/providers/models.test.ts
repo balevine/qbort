@@ -4,8 +4,6 @@ import { costForUsage, getModelId, getPricing, HOSTED_MODELS } from './models'
 describe('models', () => {
   it('exposes a cost-balanced model id per hosted provider', () => {
     expect(getModelId('anthropic')).toBe(HOSTED_MODELS.anthropic.model)
-    expect(getModelId('openai')).toBe(HOSTED_MODELS.openai.model)
-    expect(getModelId('gemini')).toBe(HOSTED_MODELS.gemini.model)
   })
 
   it('treats Ollama as free/local', () => {

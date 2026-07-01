@@ -22,6 +22,24 @@ export function errorMessage(e: unknown, fallback?: string): string {
   return fallback ?? String(e)
 }
 
+/** Sequential integer id → "#123". */
+export function formatTicketId(id: number): string {
+  return `#${id}`
+}
+
+/** ISO 8601 → a compact local date+time, e.g. "Jun 30, 2026, 12:00 PM". Falls back to the raw string. */
+export function formatTimestamp(iso: string): string {
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return iso
+  return new Date(t).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+}
+
 /** Milliseconds → "1m 13s" / "8.2s". */
 export function formatDuration(ms: number): string {
   const s = ms / 1000

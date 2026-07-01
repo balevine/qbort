@@ -14,7 +14,9 @@ export function filterTickets(
   return tickets.filter((t) => {
     if (status !== 'all' && t.status !== status) return false
     if (q) {
-      const hay = `${t.id} ${t.subject} ${t.body} ${t.from.name} ${t.from.email}`.toLowerCase()
+      const hay = [t.id, t.subject, ...t.messages.flatMap((m) => [m.body, m.from.name, m.from.email])]
+        .join(' ')
+        .toLowerCase()
       if (!hay.includes(q)) return false
     }
     return true

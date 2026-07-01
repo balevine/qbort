@@ -2,7 +2,7 @@
   "name": "ticket-generator",
   "version": "0.1.0",
   "description": "Local-first desktop app that generates fake customer support tickets with an LLM.",
-  "author": "",
+  "author": "Brian Levine <balevine@gmail.com>",
   "license": "MIT",
   "main": "./out/main/index.js",
   "scripts": {
@@ -14,7 +14,11 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "pack:dir": "npm run build && electron-builder --dir",
+    "dist:mac": "npm run build && electron-builder --mac --universal",
+    "dist": "npm run build && electron-builder",
+    "release": "npm run build && electron-builder --mac --universal --publish always"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.4",
@@ -34,6 +38,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",

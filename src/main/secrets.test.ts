@@ -45,7 +45,7 @@ describe('SecretStore', () => {
 
   it('stores ciphertext at rest, never plaintext', async () => {
     const store = new SecretStore(dir, makeFakeCrypto())
-    await store.setKey('openai', 'super-secret-value')
+    await store.setKey('anthropic', 'super-secret-value')
 
     const onDisk = await fs.readFile(join(dir, 'secrets.json'), 'utf-8')
     expect(onDisk).not.toContain('super-secret-value')
@@ -54,22 +54,22 @@ describe('SecretStore', () => {
 
   it('clears a key', async () => {
     const store = new SecretStore(dir, makeFakeCrypto())
-    await store.setKey('gemini', 'g-key')
-    expect(await store.clearKey('gemini')).toBe(true)
-    expect(await store.hasKey('gemini')).toBe(false)
-    expect(await store.getKey('gemini')).toBeNull()
+    await store.setKey('anthropic', 'a-key')
+    expect(await store.clearKey('anthropic')).toBe(true)
+    expect(await store.hasKey('anthropic')).toBe(false)
+    expect(await store.getKey('anthropic')).toBeNull()
   })
 
   it('reports status for all hosted providers', async () => {
     const store = new SecretStore(dir, makeFakeCrypto())
     await store.setKey('anthropic', 'a')
-    expect(await store.status()).toEqual({ anthropic: true, openai: false, gemini: false })
+    expect(await store.status()).toEqual({ anthropic: true })
   })
 
   it('rejects empty keys and throws when encryption is unavailable', async () => {
-    expect(await new SecretStore(dir, makeFakeCrypto()).setKey('openai', '   ')).toBe(false)
+    expect(await new SecretStore(dir, makeFakeCrypto()).setKey('anthropic', '   ')).toBe(false)
     await expect(
-      new SecretStore(dir, makeFakeCrypto(false)).setKey('openai', 'x')
+      new SecretStore(dir, makeFakeCrypto(false)).setKey('anthropic', 'x')
     ).rejects.toThrow(/unavailable/i)
   })
 

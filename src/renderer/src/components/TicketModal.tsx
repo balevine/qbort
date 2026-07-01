@@ -7,8 +7,8 @@ import {
   DialogTitle
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { isStaffEmail } from '@shared/staff'
-import type { Ticket, TicketAuthor } from '@shared/types'
+import type { Ticket } from '@shared/types'
+import { formatTicketId, formatTimestamp } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 interface TicketModalProps {
@@ -21,12 +21,6 @@ interface TicketModalProps {
   onNext: () => void
 }
 
-interface Message {
-  body: string
-  from: TicketAuthor
-  staff: boolean
-}
-
 /** Conversation modal with prev/next navigation through the filtered list. */
 export function TicketModal({ ticket, index, total, onClose, onPrev, onNext }: TicketModalProps) {
   if (!ticket) return null
@@ -34,14 +28,7 @@ export function TicketModal({ ticket, index, total, onClose, onPrev, onNext }: T
   const hasPrev = index > 0
   const hasNext = index < total - 1
 
-  const messages: Message[] = [
-    { body: ticket.body, from: ticket.from, staff: isStaffEmail(ticket.from.email) },
-    ...ticket.responses.map((r) => ({
-      body: r.body,
-      from: r.from,
-      staff: isStaffEmail(r.from.email)
-    }))
-  ]
+  const messages = ticket.messages
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowRight' && hasNext) {
@@ -58,7 +45,7 @@ export function TicketModal({ ticket, index, total, onClose, onPrev, onNext }: T
       <DialogContent className="h-[80vh] max-w-2xl" onKeyDown={onKeyDown} aria-describedby={undefined}>
         <DialogHeader>
           <div className="flex items-center gap-2 pr-8">
-            <span className="font-mono text-[11px] text-paper/60">{ticket.id}</span>
+            <span className="font-mono text-[11px] text-paper/60">{formatTicketId(ticket.id)}</span>
             <DialogTitle className="truncate normal-case tracking-normal">{ticket.subject}</DialogTitle>
           </div>
           <div className="mt-1 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-paper/60">
@@ -69,13 +56,16 @@ export function TicketModal({ ticket, index, total, onClose, onPrev, onNext }: T
 
         <DialogBody className="min-h-0 flex-1 space-y-3 bg-ink/[0.03]">
           {messages.map((m, i) => (
-            <div key={i} className={cn('border-2 border-ink p-3', m.staff ? 'bg-staff/60' : 'bg-paper')}>
+            <div key={i} className={cn('border-2 border-ink p-3', m.isStaff ? 'bg-staff/60' : 'bg-paper')}>
               <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] text-ink/60">
                 <span className="truncate">
                   {m.from.name} &lt;{m.from.email}&gt;
                 </span>
-                <span className="font-bold uppercase tracking-widest">
-                  {m.staff ? 'Staff' : 'Customer'}
+                <span className="flex items-center gap-2">
+                  <span className="whitespace-nowrap text-ink/45">{formatTimestamp(m.createdAt)}</span>
+                  <span className="font-bold uppercase tracking-widest">
+                    {m.isStaff ? 'Staff' : 'Customer'}
+                  </span>
                 </span>
               </div>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-ink">{m.body}</p>

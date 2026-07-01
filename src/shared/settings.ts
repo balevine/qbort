@@ -5,7 +5,8 @@ import { DEFAULT_STAFF_ROSTER, normalizeRoster } from './staff'
 export const LIMITS = {
   numTickets: { min: 1, max: 5000, default: 100 },
   avgStaffResponses: { min: 0, max: 20, default: 0 },
-  numStaffMembers: { min: 1, max: 100, default: 10 }
+  numStaffMembers: { min: 1, max: 100, default: 10 },
+  maxTicketAgeDays: { min: 1, max: 3650, default: 90 }
 } as const
 
 export const DEFAULT_OLLAMA_HOST = 'http://localhost:11434'
@@ -25,7 +26,8 @@ export const DEFAULT_GENERATION: GenerationSettings = {
   numTickets: LIMITS.numTickets.default,
   includeStaffResponses: false,
   avgStaffResponses: LIMITS.avgStaffResponses.default,
-  numStaffMembers: LIMITS.numStaffMembers.default
+  numStaffMembers: LIMITS.numStaffMembers.default,
+  maxTicketAgeDays: LIMITS.maxTicketAgeDays.default
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -55,7 +57,7 @@ export function withDefaults(raw: unknown): Settings {
 
   return {
     providerId:
-      r.providerId && ['ollama', 'anthropic', 'openai', 'gemini'].includes(r.providerId)
+      r.providerId && ['ollama', 'anthropic'].includes(r.providerId)
         ? r.providerId
         : DEFAULT_SETTINGS.providerId,
     ollama: {
@@ -79,6 +81,12 @@ export function withDefaults(raw: unknown): Settings {
         LIMITS.numStaffMembers.min,
         LIMITS.numStaffMembers.max,
         LIMITS.numStaffMembers.default
+      ),
+      maxTicketAgeDays: clampInt(
+        gen.maxTicketAgeDays,
+        LIMITS.maxTicketAgeDays.min,
+        LIMITS.maxTicketAgeDays.max,
+        LIMITS.maxTicketAgeDays.default
       )
     },
     staffRoster:

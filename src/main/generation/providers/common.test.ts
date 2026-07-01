@@ -30,14 +30,14 @@ describe('maxTokensFor', () => {
 
 describe('errorFromResponse', () => {
   it('marks 429 and 5xx as retryable, 4xx as not', async () => {
-    const e429 = await errorFromResponse('openai', new Response('rate', { status: 429 }))
+    const e429 = await errorFromResponse('anthropic', new Response('rate', { status: 429 }))
     expect(e429.retryable).toBe(true)
     expect(e429.status).toBe(429)
 
-    const e503 = await errorFromResponse('openai', new Response('busy', { status: 503 }))
+    const e503 = await errorFromResponse('anthropic', new Response('busy', { status: 503 }))
     expect(e503.retryable).toBe(true)
 
-    const e401 = await errorFromResponse('openai', new Response('nope', { status: 401 }))
+    const e401 = await errorFromResponse('anthropic', new Response('nope', { status: 401 }))
     expect(e401.retryable).toBe(false)
   })
 })

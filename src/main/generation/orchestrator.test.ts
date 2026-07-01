@@ -63,10 +63,7 @@ describe('runGeneration', () => {
       sleep: noSleep
     })
     expect(result.tickets).toHaveLength(10)
-    expect(result.tickets.map((t) => t.id)).toEqual([
-      'T-00001', 'T-00002', 'T-00003', 'T-00004', 'T-00005',
-      'T-00006', 'T-00007', 'T-00008', 'T-00009', 'T-00010'
-    ])
+    expect(result.tickets.map((t) => t.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     expect(result.usage.batches).toBe(3) // 4 + 4 + 2
     expect(result.usage.inputTokens).toBe(30)
     expect(result.cancelled).toBe(false)

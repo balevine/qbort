@@ -35,7 +35,14 @@ const sampleFile: TicketFile = {
     }
   },
   tickets: [
-    { id: 'T-00001', subject: 's', body: 'b', status: 'open', from: { name: 'n', email: 'e@x.com' }, responses: [] }
+    {
+      id: 1,
+      subject: 's',
+      status: 'open',
+      messages: [
+        { from: { name: 'n', email: 'e@x.com' }, body: 'b', isStaff: false, createdAt: '2026-06-30T00:00:00.000Z' }
+      ]
+    }
   ]
 }
 
@@ -66,7 +73,7 @@ describe('TicketStore', () => {
   it('overwrites atomically on repeated writes', async () => {
     const store = new TicketStore(dir)
     await store.write(sampleFile)
-    const updated = { ...sampleFile, tickets: [...sampleFile.tickets, { ...sampleFile.tickets[0], id: 'T-00002' }] }
+    const updated = { ...sampleFile, tickets: [...sampleFile.tickets, { ...sampleFile.tickets[0], id: 2 }] }
     await store.write(updated)
     const read = await TicketStore.readFile(store.filePath)
     expect(read?.tickets).toHaveLength(2)
@@ -81,7 +88,7 @@ describe('TicketStore', () => {
         ...sampleFile,
         tickets: Array.from({ length: n + 1 }, (_, i) => ({
           ...sampleFile.tickets[0],
-          id: `T-${String(i + 1).padStart(5, '0')}`
+          id: i + 1
         }))
       })
     )

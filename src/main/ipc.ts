@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs'
 import { join } from 'path'
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
-import { IpcChannels, type AppInfo, type ProviderId } from '@shared/types'
+import { IpcChannels, type ProviderId } from '@shared/types'
 import { SettingsStore } from './settings'
 import { SecretStore } from './secrets'
 import { listOllamaModels, testConnection } from './connection'
@@ -27,15 +27,6 @@ export function registerIpcHandlers(): void {
   const settings = new SettingsStore(userData)
   const secrets = new SecretStore(userData)
   const generation = new GenerationService(settings, secrets, userData, app.getVersion())
-
-  ipcMain.handle(IpcChannels.appGetInfo, (): AppInfo => {
-    return {
-      name: app.getName(),
-      version: app.getVersion(),
-      platform: process.platform,
-      electron: process.versions.electron
-    }
-  })
 
   // --- Settings ---------------------------------------------------------------
   ipcMain.handle(IpcChannels.settingsGet, () => settings.get())
