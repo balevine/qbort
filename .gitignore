@@ -7,3 +7,4 @@ release/
 .vite/
 coverage/
 *.tsbuildinfo
+.notes
