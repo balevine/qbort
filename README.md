@@ -19,7 +19,7 @@ Everything runs on your machine. The app only reaches out to the network to make
 
 1. Go to the [**Releases**](../../releases) page and download the latest `.dmg`.
 2. Open the `.dmg` and drag **Qbort** into your **Applications** folder.
-3. **First launch:** the app is currently **unsigned**, so macOS will refuse to open it on a double-click ("Apple cannot check it for malicious software"). To get past this the first time: **right-click (or Control-click) the app → Open → Open** in the dialog. You only need to do this once. If it still refuses, run:
+3. **First launch (unsigned app):** the app is currently **unsigned**, so macOS blocks it the first time you open it ("Apple cannot check it for malicious software"). The exact steps depend on your macOS version. On **macOS 14 and earlier**, right-click (or Control-click) the app → **Open**, then click **Open** in the confirmation dialog. On **macOS 15 (Sequoia) and later**, double-click the app once (it will be blocked), then open **System Settings → Privacy & Security**, find the "Qbort was blocked" message near the bottom, and click **Open Anyway**. You only need to do this once. Either way, this Terminal command clears the quarantine flag and skips the dialogs entirely:
    ```bash
    xattr -dr com.apple.quarantine "/Applications/Qbort.app"
    ```
