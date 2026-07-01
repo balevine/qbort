@@ -125,4 +125,4 @@ To work on the project locally, see [Build and run from source](#option-b--build
 
 ## License
 
-MIT
+[MIT](LICENSE)
