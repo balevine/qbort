@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+    margin: 0;
+  }
+
+  /* Neo-brutalist focus: hard black ring, no glow. */
+  *:focus-visible {
+    outline: 2px solid #000000;
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Shared neo-brutalist surface: hard border + solid offset shadow, square corners. */
+  .brutal-box {
+    @apply border-2 border-ink bg-paper rounded-none shadow-brutal;
+  }
+
+  /* Neo-brutalist range slider (Chromium / Electron only). */
+  .brutal-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    background: #000000;
+    cursor: pointer;
+  }
+  .brutal-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 20px;
+    width: 20px;
+    background: #ffffff;
+    border: 2px solid #000000;
+    border-radius: 0;
+  }
+  .brutal-range:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  /* Indeterminate progress: a block sliding across the track while we wait for the
+     first batch (time-to-first-token can be long, especially on local models). */
+  @keyframes tg-indeterminate {
+    0% {
+      transform: translateX(-110%);
+    }
+    100% {
+      transform: translateX(520%);
+    }
+  }
+  .tg-indeterminate {
+    animation: tg-indeterminate 1.3s ease-in-out infinite;
+  }
+}
