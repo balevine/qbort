@@ -1,4 +1,4 @@
-# Ticket Generator — Project Spec
+# Qbort — Project Spec
 
 A local-first Electron desktop app that generates fake customer-support tickets with an LLM, based on user-controlled settings and an editable prompt. The app runs entirely locally and only reaches out to an external LLM provider when generating ticket data. Generated tickets are written to a JSON file the user can view in-app and export.
 
@@ -244,7 +244,7 @@ Output is written incrementally/atomically so a crash mid-run still leaves a val
 - **Packaging**: `electron-builder` (.dmg/.zip first) — later phase.
 
 ```
-ticket-generator/
+qbort/
 ├─ package.json
 ├─ electron.vite.config.ts
 ├─ tsconfig.json
