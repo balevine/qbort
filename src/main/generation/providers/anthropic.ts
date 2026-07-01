@@ -1,8 +1,10 @@
-import type { GenerateBatchArgs, GenerateBatchResult, LLMProvider } from './types'
+import { TruncationError, type GenerateBatchArgs, type GenerateBatchResult, type LLMProvider } from './types'
 import { SYSTEM_PROMPT, TEMPERATURE, extractJson, postJson, resolveMaxTokens } from './common'
 
 interface AnthropicResponse {
   content?: Array<{ type?: string; text?: string }>
+  /** `max_tokens` here means the model was cut off mid-output — the JSON will be truncated. */
+  stop_reason?: string | null
   usage?: {
     input_tokens?: number
     output_tokens?: number
@@ -46,6 +48,9 @@ export class AnthropicProvider implements LLMProvider {
       },
       signal
     })) as AnthropicResponse
+    // A cut-off response yields unparseable JSON; surface it as retryable so the orchestrator can
+    // grow the token budget or split the batch rather than dropping it after a doomed JSON parse.
+    if (data.stop_reason === 'max_tokens') throw new TruncationError('anthropic')
     const text = (data.content ?? []).map((b) => b.text ?? '').join('')
     const u = data.usage ?? {}
     // With caching, cached tokens are reported separately from `input_tokens`; sum them all

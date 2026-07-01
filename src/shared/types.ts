@@ -18,6 +18,15 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   anthropic: 'Anthropic'
 }
 
+/**
+ * Human-readable name of the fixed model each hosted provider uses. Hosted providers don't let
+ * the user choose a model (§5) — this is display-only. The authoritative model id + pricing live
+ * in `main/generation/providers/models.ts`; keep this label in sync with it.
+ */
+export const HOSTED_MODEL_LABELS: Partial<Record<ProviderId, string>> = {
+  anthropic: 'Claude Sonnet 5'
+}
+
 export function isHostedProvider(id: ProviderId): boolean {
   return HOSTED_PROVIDERS.includes(id)
 }
@@ -210,8 +219,11 @@ export interface IpcApi {
     loadDefault: () => Promise<LoadedTickets | null>
     /** Open a file picker and load the chosen tickets JSON. */
     open: () => Promise<LoadedTickets | null>
-    /** Export the currently-loaded file to a chosen path; returns the destination or null. */
-    export: (sourcePath: string) => Promise<string | null>
+    /**
+     * Export the currently-loaded file (tracked in main) to a chosen path; returns the
+     * destination or null. Takes no source path — main never exports a renderer-supplied one.
+     */
+    export: () => Promise<string | null>
   }
   dialog: {
     chooseDirectory: () => Promise<string | null>

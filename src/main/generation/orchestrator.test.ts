@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { backoffMs, backoffWithJitter, runGeneration, type BatchSnapshot } from './orchestrator'
-import { ProviderError, type GenerateBatchResult, type LLMProvider } from './providers'
+import { ProviderError, TruncationError, type GenerateBatchResult, type LLMProvider } from './providers'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import type { GenerationProgress, Settings } from '@shared/types'
+
+/** Canned raw tickets a fake provider can return. */
+function rawTickets(n: number): unknown {
+  return {
+    tickets: Array.from({ length: n }, (_, i) => ({
+      subject: `Subject ${i}`,
+      body: `Body ${i}`,
+      status: 'open',
+      from: { name: `Cust ${i}`, email: `cust${i}@example.com` }
+    }))
+  }
+}
 
 function settingsWith(numTickets: number, overrides: Partial<Settings['generation']> = {}): Settings {
   return {
@@ -198,6 +210,77 @@ describe('runGeneration', () => {
     expect(result.usage.batches).toBe(3) // 4 + 4 + 2
     expect(result.usage.inputTokens).toBe(30) // 3 batches × 10
     expect(result.usage.outputTokens).toBe(60) // 3 batches × 20
+  })
+
+  it('grows the token budget and retries when a batch truncates', async () => {
+    let firstBudget: number | undefined
+    const provider: LLMProvider = {
+      id: 'anthropic',
+      model: 'm',
+      async generateBatch({ count, maxOutputTokens }) {
+        if (firstBudget === undefined) {
+          firstBudget = maxOutputTokens
+          throw new TruncationError('anthropic')
+        }
+        // The retry must ask for a bigger budget than the attempt that truncated.
+        expect(maxOutputTokens).toBeGreaterThan(firstBudget!)
+        return { raw: rawTickets(count), usage: { inputTokens: 1, outputTokens: 1 } }
+      }
+    }
+    const result = await runGeneration({
+      provider,
+      settings: settingsWith(4),
+      signal: new AbortController().signal,
+      batchSize: 4,
+      concurrency: 1,
+      sleep: noSleep
+    })
+    expect(result.tickets).toHaveLength(4)
+    expect(result.retries).toBeGreaterThanOrEqual(1)
+  })
+
+  it('splits a batch that truncates even at the max budget until the pieces fit', async () => {
+    // Truncates for any multi-ticket batch; only single-ticket batches succeed. The orchestrator
+    // must recursively split 4 → 2+2 → 1+1+1+1 and still produce all four tickets.
+    const provider: LLMProvider = {
+      id: 'anthropic',
+      model: 'm',
+      async generateBatch({ count }) {
+        if (count > 1) throw new TruncationError('anthropic')
+        return { raw: rawTickets(count), usage: { inputTokens: 1, outputTokens: 1 } }
+      }
+    }
+    const result = await runGeneration({
+      provider,
+      settings: settingsWith(4),
+      signal: new AbortController().signal,
+      batchSize: 4,
+      concurrency: 1,
+      maxRetries: 2,
+      sleep: noSleep
+    })
+    expect(result.tickets).toHaveLength(4)
+    expect(result.tickets.map((t) => t.id)).toEqual([1, 2, 3, 4])
+  })
+
+  it('caps a batch to the requested count when the model over-delivers', async () => {
+    const provider: LLMProvider = {
+      id: 'ollama',
+      model: 'm',
+      async generateBatch({ count }) {
+        return { raw: rawTickets(count + 3), usage: { inputTokens: 1, outputTokens: 1 } }
+      }
+    }
+    const result = await runGeneration({
+      provider,
+      settings: settingsWith(4),
+      signal: new AbortController().signal,
+      batchSize: 4,
+      concurrency: 1,
+      sleep: noSleep
+    })
+    expect(result.tickets).toHaveLength(4) // extras dropped, not 7
+    expect(result.tickets.map((t) => t.id)).toEqual([1, 2, 3, 4])
   })
 
   it('invokes onBatchComplete with growing snapshots', async () => {

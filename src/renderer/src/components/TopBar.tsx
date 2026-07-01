@@ -15,7 +15,7 @@ export function TopBar({ onOpenSettings, onLoadTickets, onGenerate, generating }
     <header className="flex items-center justify-between border-b-2 border-ink bg-paper px-5 py-3">
       <div className="flex items-baseline gap-3">
         <span className="border-2 border-ink bg-ink px-2 py-1 font-mono text-sm font-bold uppercase tracking-widest text-paper">
-          Ticket Generator
+          Qbort
         </span>
         <span className="hidden font-mono text-xs uppercase tracking-widest text-ink/50 sm:inline">
           fake support data

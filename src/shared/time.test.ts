@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { messageTimestamps, openingTimesForRun } from './time'
+import { RECENT_TICKET_WINDOW_MS, isRecentOpening, messageTimestamps, openingTimesForRun } from './time'
 
 const NOW = Date.parse('2026-06-30T12:00:00.000Z')
 const DAY = 24 * 60 * 60 * 1000
+const MINUTE = 60 * 1000
 
 // Deterministic LCG so ordering assertions are stable.
 function lcg(seed: number): () => number {
@@ -47,6 +48,15 @@ describe('messageTimestamps', () => {
     for (const t of times) expect(t).toBeLessThanOrEqual(NOW)
   })
 
+  it('stays strictly increasing even when many messages must fit a tiny window before now', () => {
+    // 10 messages into a 5-minute window would tie at `now` under naive clamping; the compressed
+    // gaps must keep every timestamp strictly after the previous one and at or before now.
+    const times = messageTimestamps(10, NOW - 5 * MINUTE, NOW, () => 1).map((s) => Date.parse(s))
+    for (let i = 1; i < times.length; i++) expect(times[i]).toBeGreaterThan(times[i - 1])
+    for (const t of times) expect(t).toBeLessThanOrEqual(NOW)
+    expect(new Set(times).size).toBe(times.length) // no duplicate instants
+  })
+
   it('always returns at least one timestamp', () => {
     expect(messageTimestamps(0, NOW, NOW, () => 0.5)).toHaveLength(1)
   })
@@ -54,5 +64,14 @@ describe('messageTimestamps', () => {
   it('is deterministic for a fixed rng', () => {
     const o = NOW - 3 * DAY
     expect(messageTimestamps(5, o, NOW, () => 0.3)).toEqual(messageTimestamps(5, o, NOW, () => 0.3))
+  })
+})
+
+describe('isRecentOpening', () => {
+  it('is true only within the recent window of now', () => {
+    expect(isRecentOpening(NOW - MINUTE, NOW)).toBe(true)
+    expect(isRecentOpening(NOW - (RECENT_TICKET_WINDOW_MS - 1), NOW)).toBe(true)
+    expect(isRecentOpening(NOW - RECENT_TICKET_WINDOW_MS, NOW)).toBe(false)
+    expect(isRecentOpening(NOW - DAY, NOW)).toBe(false)
   })
 })

@@ -37,7 +37,7 @@ const api: IpcApi = {
   tickets: {
     loadDefault: () => ipcRenderer.invoke(IpcChannels.ticketsLoadDefault),
     open: () => ipcRenderer.invoke(IpcChannels.ticketsOpen),
-    export: (sourcePath: string) => ipcRenderer.invoke(IpcChannels.ticketsExport, sourcePath)
+    export: () => ipcRenderer.invoke(IpcChannels.ticketsExport)
   },
   dialog: {
     chooseDirectory: () => ipcRenderer.invoke(IpcChannels.dialogChooseDirectory)

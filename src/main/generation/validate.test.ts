@@ -55,6 +55,12 @@ describe('repairTicket', () => {
     )
     expect(t!.messages).toHaveLength(2) // opening + one valid reply
   })
+
+  it('forces the opening message to customer role even if the model gives it a staff-domain email', () => {
+    // The app owns role; a customer opener on @company.biz must never be mislabeled as staff.
+    const t = repairTicket({ ...goodRaw, from: { name: 'Imposter', email: 'imposter@company.biz' } }, withStaff)
+    expect(t!.messages[0].isStaff).toBe(false)
+  })
 })
 
 describe('extractTicketArray', () => {
@@ -104,5 +110,14 @@ describe('assembleTickets', () => {
     expect(times[0]).toBe(openings[0])
     expect(times[1]).toBeGreaterThanOrEqual(times[0])
     expect(times[1]).toBeLessThanOrEqual(NOW)
+  })
+
+  it('drops replies for a ticket opened within the recent window (no time to respond yet)', () => {
+    const drafts = validateTickets({ tickets: [goodRaw] }, withStaff).tickets
+    expect(drafts[0].messages).toHaveLength(2) // opening + reply before assembly
+    const recent = { nowMs: NOW, rng: () => 0.5, openingMsForId: () => NOW - 60_000 } // 1 min ago
+    const [ticket] = assembleTickets(drafts, 1, recent)
+    expect(ticket.messages).toHaveLength(1) // reply dropped
+    expect(ticket.messages[0].isStaff).toBe(false)
   })
 })

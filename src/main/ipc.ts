@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs'
 import { join } from 'path'
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
-import { IpcChannels, type ProviderId } from '@shared/types'
+import { ALL_PROVIDERS, IpcChannels, type ProviderId } from '@shared/types'
 import { SettingsStore } from './settings'
 import { SecretStore } from './secrets'
 import { listOllamaModels, testConnection } from './connection'
@@ -18,6 +18,14 @@ function showSave(sender: Electron.WebContents, options: Electron.SaveDialogOpti
   return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options)
 }
 
+/** Validate an untrusted provider id from the renderer before it reaches the store/adapters. */
+function assertProviderId(value: unknown): ProviderId {
+  if (typeof value === 'string' && (ALL_PROVIDERS as string[]).includes(value)) {
+    return value as ProviderId
+  }
+  throw new Error(`Unknown provider: ${String(value)}`)
+}
+
 /**
  * Registers all IPC handlers. Keep every channel here and allow-listed in the preload
  * bridge — the renderer can only reach what is explicitly exposed.
@@ -28,24 +36,31 @@ export function registerIpcHandlers(): void {
   const secrets = new SecretStore(userData)
   const generation = new GenerationService(settings, secrets, userData, app.getVersion())
 
+  // The path of the file currently loaded in the view — set only by the main process (load /
+  // open / generate). Export copies *this*, never a path handed in by the renderer, so a buggy
+  // or compromised renderer can't turn export into an arbitrary-file read.
+  let loadedPath: string | null = null
+
   // --- Settings ---------------------------------------------------------------
   ipcMain.handle(IpcChannels.settingsGet, () => settings.get())
   ipcMain.handle(IpcChannels.settingsSet, (_e, partial) => settings.set(partial))
 
   // --- Secrets (keys never returned to the renderer) --------------------------
-  ipcMain.handle(IpcChannels.secretsSetKey, (_e, provider: ProviderId, key: string) =>
-    secrets.setKey(provider, key)
+  ipcMain.handle(IpcChannels.secretsSetKey, (_e, provider: unknown, key: unknown) =>
+    secrets.setKey(assertProviderId(provider), String(key ?? ''))
   )
-  ipcMain.handle(IpcChannels.secretsHasKey, (_e, provider: ProviderId) => secrets.hasKey(provider))
-  ipcMain.handle(IpcChannels.secretsClearKey, (_e, provider: ProviderId) =>
-    secrets.clearKey(provider)
+  ipcMain.handle(IpcChannels.secretsHasKey, (_e, provider: unknown) =>
+    secrets.hasKey(assertProviderId(provider))
+  )
+  ipcMain.handle(IpcChannels.secretsClearKey, (_e, provider: unknown) =>
+    secrets.clearKey(assertProviderId(provider))
   )
   ipcMain.handle(IpcChannels.secretsStatus, () => secrets.status())
 
   // --- Provider connectivity --------------------------------------------------
-  ipcMain.handle(IpcChannels.providerTestConnection, async (_e, provider: ProviderId) => {
+  ipcMain.handle(IpcChannels.providerTestConnection, async (_e, provider: unknown) => {
     const current = await settings.get()
-    return testConnection(provider, {
+    return testConnection(assertProviderId(provider), {
       host: current.ollama.host,
       getKey: (p) => secrets.getKey(p)
     })
@@ -54,11 +69,13 @@ export function registerIpcHandlers(): void {
 
   // --- Generation -------------------------------------------------------------
   ipcMain.handle(IpcChannels.generationEstimate, () => generation.estimate())
-  ipcMain.handle(IpcChannels.generationStart, (e) =>
-    generation.start((progress) => {
+  ipcMain.handle(IpcChannels.generationStart, async (e) => {
+    const result = await generation.start((progress) => {
       if (!e.sender.isDestroyed()) e.sender.send(IpcChannels.generationProgress, progress)
     })
-  )
+    loadedPath = result.filePath
+    return result
+  })
   ipcMain.handle(IpcChannels.generationCancel, () => {
     generation.cancel()
   })
@@ -68,7 +85,9 @@ export function registerIpcHandlers(): void {
     const s = await settings.get()
     const path = s.lastOutputPath || join(resolveOutputDir(s, userData), DEFAULT_TICKETS_FILENAME)
     const file = await TicketStore.readFile(path)
-    return file ? { file, filePath: path } : null
+    if (!file) return null
+    loadedPath = path
+    return { file, filePath: path }
   })
 
   ipcMain.handle(IpcChannels.ticketsOpen, async (e) => {
@@ -84,17 +103,20 @@ export function registerIpcHandlers(): void {
     const file = await TicketStore.readFile(path)
     if (!file) throw new Error('That file is not a valid tickets JSON file.')
     await settings.set({ lastOutputPath: path })
+    loadedPath = path
     return { file, filePath: path }
   })
 
-  ipcMain.handle(IpcChannels.ticketsExport, async (e, sourcePath: string) => {
+  ipcMain.handle(IpcChannels.ticketsExport, async (e) => {
+    // Export the file the main process knows is loaded — never a path supplied by the renderer.
+    if (!loadedPath) return null
     const result = await showSave(e.sender, {
       title: 'Export tickets',
       defaultPath: 'tickets.json',
       filters: [{ name: 'Tickets JSON', extensions: ['json'] }]
     })
     if (result.canceled || !result.filePath) return null
-    await fs.copyFile(sourcePath, result.filePath)
+    await fs.copyFile(loadedPath, result.filePath)
     return result.filePath
   })
 

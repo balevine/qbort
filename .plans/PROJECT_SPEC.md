@@ -37,7 +37,7 @@ A conversation-thread shape: every message — including the customer's opening 
     "generatedAt": "2026-06-30T12:00:00Z",
     "appVersion": "0.1.0",
     "provider": "anthropic",
-    "model": "claude-sonnet-4-6",
+    "model": "claude-sonnet-5",
     "requestedCount": 100,
     "generatedCount": 100,
     "settings": { /* snapshot of settings used (no secrets) */ },
@@ -80,11 +80,12 @@ Schema notes:
 - `id` — sequential **integer** (1, 2, 3…), assigned by the app, not trusted from the LLM.
 - `status` — string from a small default set (`new`, `open`, `pending`, `on-hold`, `solved`, `closed`). The set is a constant the user can influence via the prompt; the app validates against the allowed set and falls back to `open` if invalid.
 - `messages[]` — the full thread, oldest first. `messages[0]` is the customer's opening message; the rest are follow-ups, driven by the staff settings (see §3).
-  - `isStaff` — assigned by the app (staff = `@company.biz` domain), so consumers don't have to re-derive role from the email.
-  - `createdAt` — an app-synthesized ISO-8601 timestamp. The app assigns realistic, ascending times: opening times are drawn across the configured **max ticket age** window (§3) and **handed out in id order, so ascending `id` ⇒ ascending ticket open time** (mirroring how real ticketing systems number tickets by creation order). Within a ticket, replies follow minutes-to-hours later, never in the future. Reply times may still interleave *across* tickets (ticket #6 can open before ticket #5's reply lands). The LLM is not trusted with timestamps.
+  - `isStaff` — assigned by the app (staff = `@company.biz` domain), so consumers don't have to re-derive role from the email. **The opening message (`messages[0]`) is always `isStaff: false`** regardless of its email domain — it is the customer's by definition, and the app never trusts the model to set role.
+  - `createdAt` — an app-synthesized ISO-8601 timestamp. The app assigns realistic times: opening times are drawn across the configured **max ticket age** window (§3) and **handed out in id order, so ascending `id` ⇒ ascending ticket open time** (mirroring how real ticketing systems number tickets by creation order). Within a ticket, replies follow minutes-to-hours later and the sequence is **strictly increasing** (when little room remains before "now" the gaps are compressed to at least 1ms rather than piling messages onto the same instant), never in the future. Reply times may still interleave *across* tickets (ticket #6 can open before ticket #5's reply lands). The LLM is not trusted with timestamps.
+  - **Recently-opened tickets have no replies yet.** A ticket whose opening time falls within a short recent window (~15 minutes of "now") keeps only its opening message even if the model produced replies — mirroring a real queue where staff haven't had time to respond, and structurally preventing reply timestamps from bunching against "now" for the newest tickets.
 - Everything else (categories, sentiment, channel, custom fields) is intentionally **omitted**; if the user wants those to influence content, they express them in the editable prompt — they shape the generated `subject`/`body`, not extra fields.
 
-Validation is enforced with **zod** in the main process against the LLM's raw output (opening `body`/`from` + `responses[]`); the app repairs where safe, drops what it can't, then reshapes each ticket into the `messages[]` form above, assigning `id`, `isStaff`, and `createdAt`.
+Validation is enforced with **zod** in the main process against the LLM's raw output (opening `body`/`from` + `responses[]`); the app repairs where safe, drops what it can't, caps each batch to the requested count (a model that over-delivers can't push ids past the pre-computed opening-time window), then reshapes each ticket into the `messages[]` form above, assigning `id`, `isStaff`, and `createdAt`.
 
 ---
 
@@ -161,8 +162,8 @@ interface LLMProvider {
 ```
 
 Implementations:
-- **Anthropic** — Messages API via `fetch`; JSON enforced via the prompt; prompt caching on the static prefix of the compiled prompt to cut cost across batches.
-- **Ollama** — `fetch` to local server (default `http://localhost:11434`); `format: json`; `listModels()` via `/api/tags`.
+- **Anthropic** — Messages API via `fetch`; JSON enforced via the prompt; prompt caching on the static prefix of the compiled prompt to cut cost across batches; detects `stop_reason: "max_tokens"` and raises a retryable truncation error (§6).
+- **Ollama** — `fetch` to local server (default `http://localhost:11434`); `format: json`; `listModels()` via `/api/tags`. NDJSON is parsed line-by-line **tolerantly** (a malformed/partial line is skipped, not fatal); an `error` field on a 200 stream and a `done_reason: "length"` truncation are both surfaced explicitly.
 - **OpenAI / Gemini** *(deferred)* — will follow the same `fetch`-based pattern when added.
 
 All provider calls happen **in the main process** (keeps keys out of the renderer, avoids CORS).
@@ -171,7 +172,7 @@ All provider calls happen **in the main process** (keeps keys out of the rendere
 - A **curated map** of the best *cost-balanced* model per hosted provider, centralized so it's a one-line update as new models ship. The user does **not** choose a model for hosted providers.
 - **Philosophy:** synthetic, text-only ticket generation is high-volume and not reasoning-heavy, so we deliberately target **mid-tier models** that balance cost, speed, and quality rather than flagships. Flagship pricing/latency is not justified across the hundreds of batches a 5,000-ticket run requires.
 - **Important (knowledge-cutoff caveat):** exact model IDs must be verified against each provider's *current* model list at implementation time. Initial targets:
-  - Anthropic → current **Sonnet** (cost-balanced workhorse) — **verify exact ID**.
+  - Anthropic → **`claude-sonnet-5`** (current cost-balanced Sonnet workhorse; verified 2026-07). The Sonnet line went 4.5 → 4.6 → 5 (there is no Sonnet 4.7 — that's the Opus line).
   - OpenAI → current cost-balanced general model *(deferred — no adapter yet)*.
   - Gemini → current **Flash**-class model *(deferred — no adapter yet)*.
 - **Ollama** is the only case where the user selects a model — populated from `listModels()`.
@@ -187,9 +188,10 @@ All provider calls happen **in the main process** (keeps keys out of the rendere
 ## 6. Generation orchestration (`orchestrator.ts`)
 
 Mirrors the Ruby batched-async approach:
-- **Batching**: split `requestedCount` into batches (configurable `batchSize`, default ~20). Up to 5000 tickets → up to ~250 batches. The batch size is **adaptively reduced** when staff responses make each ticket large, so a batch's expected output stays within the model's token budget and doesn't get truncated mid-JSON (which would drop the whole batch). `max_tokens` is sized per batch from the expected output rather than a fixed constant.
+- **Batching**: split `requestedCount` into batches (configurable `batchSize`, default ~20). Up to 5000 tickets → up to ~250 batches. The batch size is **adaptively reduced** when staff responses make each ticket large, so a batch's expected output stays within the model's token budget and doesn't get truncated mid-JSON (which would drop the whole batch). `max_tokens` is sized per batch from the expected output — using the **actual per-ticket response counts sampled for that batch** (their sum captures the Poisson tail a flat average misses), not a fixed constant.
+- **Truncation handling**: providers detect a cut-off response (Anthropic `stop_reason: "max_tokens"`, Ollama `done_reason: "length"`) and raise a distinct, retryable **truncation error** instead of letting the truncated JSON fail a parse and drop the batch. The orchestrator responds by **growing `max_tokens`** on retry and, once at the ceiling, **splitting the batch in half** (recursively) so the smaller batches produce less output and fit — preserving the ticket count instead of dropping it.
 - **Concurrency**: limited parallelism (e.g. `p-limit`, 3–5 concurrent) to respect rate limits.
-- **Retry/backoff**: on `429`/rate-limit, exponential/linear backoff with max retries (as in the Ruby script). Per-batch failures are isolated; partial success is kept.
+- **Retry/backoff**: on `429`/rate-limit (and transient malformed output), exponential/linear backoff with max retries (as in the Ruby script). Retries are **not** issued after cancellation lands mid-backoff. Per-batch failures are isolated; partial success is kept.
 - **Progress**: main streams progress events to renderer via `webContents.send` (`generation:progress`): batches done, tickets done, retries, errors, ETA.
 - **Cancellation**: `AbortController`; a Cancel button aborts in-flight requests and stops scheduling new batches; tickets produced so far are still written.
 - **ID assignment & validation**: after each batch, tickets are validated (zod), repaired or dropped, assigned sequential ids, and appended to the output.
@@ -224,8 +226,9 @@ Output is written incrementally/atomically so a crash mid-run still leaves a val
 
 - **Keys in OS keychain — decided: Electron `safeStorage`.** It's the official, actively maintained Electron API; the app encrypts each key and the encryption key is held in the OS keychain (Keychain on macOS, libsecret on Linux, DPAPI on Windows). `keytar` was considered and rejected — it is archived/unmaintained and requires native rebuilds. `safeStorage` is both better-supported and at least as secure for this use. Encrypted blobs are stored under `userData`; the keychain protects the encryption key.
 - Keys are **only** read in the main process at call time and **never** sent to the renderer. Renderer can request "store key for provider X" / "is a key set for X?" / "test connection", nothing more.
-- **Renderer hardening**: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`; a strict `preload` exposing a minimal, typed `window.api` via `contextBridge`; a strict CSP applied to every renderer response via the main process (`session.webRequest.onHeadersReceived` in `src/main/index.ts`) rather than a `<meta>` tag in `index.html` — enforcing it at the header level is stronger and covers responses a meta tag can't. Production locks egress to `default-src 'self'` (no external `connect-src`, since all network calls happen in main).
+- **Renderer hardening**: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`; a strict `preload` exposing a minimal, typed `window.api` via `contextBridge`; a strict CSP applied to every renderer response via the main process (`session.webRequest.onHeadersReceived` in `src/main/index.ts`) rather than a `<meta>` tag in `index.html` — enforcing it at the header level is stronger and covers responses a meta tag can't. Production locks egress to `default-src 'self'` (no external `connect-src`, since all network calls happen in main), plus `object-src 'none'`, `base-uri 'none'`, `frame-src 'none'`, and `form-action 'none'` to close plugin/embedding/`<base>`/form-post vectors.
 - **All network egress from main only**; renderer makes no external requests.
+- **IPC input is validated in main**: provider ids from the renderer are checked against the allow-list before reaching the secret store or adapters, and numeric settings are re-clamped on every write. The **export** channel takes no path from the renderer — main tracks the currently-loaded file and exports that, so a buggy/compromised renderer can't turn export into an arbitrary-file read.
 
 ---
 
@@ -290,7 +293,7 @@ ticket-generator/
 - `ollama.listModels(host)`
 - `prompt.compile(settings)` → preview string
 - `generation.start(config)` / `generation.cancel()` + `onProgress(cb)` event
-- `tickets.loadDefault()` / `tickets.open()` / `tickets.export(path)`
+- `tickets.loadDefault()` / `tickets.open()` / `tickets.export()` (exports the file main has loaded; no renderer-supplied path)
 
 ---
 
@@ -345,12 +348,15 @@ Goal: a small, fast, **deterministic** suite that locks in core behavior so new 
 
 ### Unit tests (pure logic)
 - `promptCompiler` — editable prompt + injected requirements compose correctly; staff roster and response guidance only appear when enabled; allowed-status list is included.
-- `validate` (zod) — valid tickets pass; malformed ones are repaired (id assigned, bad status → `open`) or dropped; `responses` stripped when staff responses are disabled.
+- `validate` (zod) — valid tickets pass; malformed ones are repaired (id assigned, bad status → `open`) or dropped; `responses` stripped when staff responses are disabled; the **opening message is forced to customer role** even on a `@company.biz` email; recently-opened tickets drop their replies on assembly.
+- `time` — opening times ascending within the window and never in the future; message timestamps **strictly increasing** even in a tiny window before "now"; `isRecentOpening` boundary.
 - `staff` — roster resize (grow/trim), alias normalization/uniqueness, derived `@company.biz` emails, default roster, auto-generate-when-empty, and the response-count distribution.
+- `generation` — token sizing from actual sampled response counts vs. the average; `max_tokens` margin + ceiling.
 - `models`/pricing — correct model + pricing selected per provider; cost math (estimate and `actualCostUsd`) is correct.
+- `fsUtil` — atomic write/read round-trip, null on missing/malformed, unique temp names under concurrent writes.
 
 ### Integration tests (cross-module flows — the regression guard)
-1. **Generation orchestration with a mock provider** — inject a fake `LLMProvider` returning canned JSON; run a multi-batch generation and assert: correct ticket count, sequential ids, role assignment (`@company.biz` ⇒ staff), batching/concurrency, retry/backoff on a simulated `429`, partial-success on a failing batch, cancellation via `AbortController`, and accumulated `meta.usage` (tokens, cost, batches, duration).
+1. **Generation orchestration with a mock provider** — inject a fake `LLMProvider` returning canned JSON; run a multi-batch generation and assert: correct ticket count, sequential ids, role assignment (`@company.biz` ⇒ staff), batching/concurrency, retry/backoff on a simulated `429`, **truncation → grow `max_tokens` → split-batch recovery**, **over-delivery capped to the requested count**, partial-success on a failing batch, cancellation via `AbortController`, and accumulated `meta.usage` (tokens, cost, batches, duration). The `GenerationService` layer is covered separately (injected clock, one-run-at-a-time guard, coalesced/atomic writes, `meta` assembly).
 2. **Storage round-trip** — write tickets to the default directory, read them back, export to a chosen path; assert the on-disk JSON matches the schema and atomic-write (temp + rename) leaves a valid file if interrupted.
 3. **Settings + secrets** — persist/restore `settings.json` (incl. roster + default directory); `safeStorage` key set/has/clear round-trips with `safeStorage` faked; assert keys are never returned to the renderer (only a boolean "is set").
 4. **End-to-end generate→load** — drive a generation through the mock provider, then load the produced file through the viewer's load path; assert tickets, pagination grouping (100/page), and the parsed conversation/role split feed the modal correctly.
@@ -370,6 +376,6 @@ Goal: a small, fast, **deterministic** suite that locks in core behavior so new 
 
 Knowledge-cutoff items that must be confirmed against the providers' **live catalogs** before shipping. All values are centralized in `src/main/generation/providers/models.ts`, so each is a one-line change.
 
-- [ ] **Anthropic** — confirm the cost-balanced Sonnet model id (currently `claude-sonnet-4-6`) and its input/output price per 1M tokens (currently $3 / $15).
-- [ ] Re-run a small generation against Anthropic to confirm the model id is accepted and the reported token usage → cost math looks right in `meta.usage`.
+- [x] **Anthropic** — model id `claude-sonnet-5` with standard pricing $3 / $15 per 1M tokens (verified against Anthropic's pricing page, 2026-07). Note: introductory Sonnet 5 pricing of $2 / $10 is in effect through 2026-08-31; the table uses the post-intro standard rate.
+- [ ] Re-run a small generation against Anthropic to confirm the model id is accepted and the reported token usage → cost math looks right in `meta.usage`. *(needs a live API key — still outstanding)*
 - *(Deferred)* **OpenAI** and **Gemini** model ids + pricing — only relevant once those adapters are added back (see §5 current scope).

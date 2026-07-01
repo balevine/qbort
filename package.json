@@ -1,5 +1,5 @@
 {
-  "name": "ticket-generator",
+  "name": "qbort",
   "version": "0.1.0",
   "description": "Local-first desktop app that generates fake customer support tickets with an LLM.",
   "author": "Brian Levine <balevine@gmail.com>",

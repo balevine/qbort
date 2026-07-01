@@ -52,6 +52,18 @@ export class ProviderError extends Error {
   }
 }
 
+/**
+ * Raised when a provider stops generating because it hit its output-token limit, leaving the
+ * JSON truncated. It's retryable, but retrying identically is pointless — the orchestrator
+ * responds by raising `max_tokens` and, failing that, splitting the batch into smaller ones.
+ */
+export class TruncationError extends ProviderError {
+  constructor(provider: ProviderId) {
+    super(`${provider} response was truncated (hit the output token limit)`, provider, undefined, true)
+    this.name = 'TruncationError'
+  }
+}
+
 /** Rate limits (429) and server errors (5xx) are worth retrying. */
 export function isRetryableStatus(status?: number): boolean {
   return status === 429 || (status !== undefined && status >= 500)

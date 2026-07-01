@@ -42,8 +42,32 @@ export function effectiveBatchSize(
   return Math.max(1, Math.min(Math.max(1, Math.floor(configured)), fit))
 }
 
+/**
+ * Expected output tokens for a batch. When the actual per-ticket response counts have been
+ * sampled they're used directly (the sum captures the Poisson tail a flat average misses);
+ * otherwise it falls back to `count × avg`. This is what we size `max_tokens` from.
+ */
+export function expectedBatchOutputTokens(
+  count: number,
+  includeStaffResponses: boolean,
+  avgStaffResponses: number,
+  responseCounts?: number[]
+): number {
+  const base = Math.max(1, count) * OUTPUT_TOKENS_PER_TICKET
+  if (!includeStaffResponses) return base
+  const responses = responseCounts
+    ? responseCounts.reduce((sum, n) => sum + n, 0)
+    : Math.max(1, count) * avgStaffResponses
+  return base + responses * OUTPUT_TOKENS_PER_RESPONSE
+}
+
+/** `max_tokens` to request for a given expected output size (+ margin), clamped. */
+export function maxOutputTokensForExpected(expectedOutputTokens: number): number {
+  const sized = Math.ceil(Math.max(1, expectedOutputTokens) * OUTPUT_TOKEN_MARGIN) + 512
+  return Math.min(MAX_OUTPUT_TOKENS_CEILING, Math.max(1024, sized))
+}
+
 /** `max_tokens` to request for a batch, sized to the expected output (+ margin), clamped. */
 export function maxOutputTokensForBatch(count: number, perTicketTokens: number): number {
-  const sized = Math.ceil(Math.max(1, count) * Math.max(1, perTicketTokens) * OUTPUT_TOKEN_MARGIN) + 512
-  return Math.min(MAX_OUTPUT_TOKENS_CEILING, Math.max(1024, sized))
+  return maxOutputTokensForExpected(Math.max(1, count) * Math.max(1, perTicketTokens))
 }

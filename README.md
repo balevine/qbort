@@ -1,4 +1,4 @@
-# Ticket Generator
+# Qbort
 
 A local-first desktop app that generates realistic, **fake customer-support tickets** with an LLM — driven by a handful of numeric settings and a fully editable prompt. It's useful for seeding demos, load-testing a helpdesk UI, or producing sample data without touching real customer information.
 
@@ -18,10 +18,10 @@ Everything runs on your machine. The app only reaches out to the network to make
 ### Option A — download the released binary (macOS)
 
 1. Go to the [**Releases**](../../releases) page and download the latest `.dmg`.
-2. Open the `.dmg` and drag **Ticket Generator** into your **Applications** folder.
+2. Open the `.dmg` and drag **Qbort** into your **Applications** folder.
 3. **First launch:** the app is currently **unsigned**, so macOS will refuse to open it on a double-click ("Apple cannot check it for malicious software"). To get past this the first time: **right-click (or Control-click) the app → Open → Open** in the dialog. You only need to do this once. If it still refuses, run:
    ```bash
-   xattr -dr com.apple.quarantine "/Applications/Ticket Generator.app"
+   xattr -dr com.apple.quarantine "/Applications/Qbort.app"
    ```
 
 ### Option B — build and run from source
@@ -29,8 +29,8 @@ Everything runs on your machine. The app only reaches out to the network to make
 Requires **Node.js 20+** and **npm**.
 
 ```bash
-git clone https://github.com/<owner>/ticket-generator.git
-cd ticket-generator
+git clone https://github.com/balevine/qbort.git
+cd qbort
 npm install
 
 # Run the app in development (hot reload):
@@ -63,7 +63,7 @@ That's it — local generation is free and never leaves your machine. (Managing/
 
 1. Select **Anthropic** as the provider.
 2. Paste your API key and click **Save**. The key is encrypted into your OS keychain; the app only ever shows whether a key is *set*, never the value. Use **Test connection** to verify it.
-3. **You do not pick a model.** For hosted providers the app automatically uses a curated, cost-balanced mid-tier model — for Anthropic, a **Claude Sonnet**–class model. Synthetic ticket generation is high-volume and doesn't need a flagship reasoning model, so the choice is fixed to keep runs fast and cheap.
+3. **You do not pick a model.** For hosted providers the app automatically uses a curated, cost-balanced mid-tier model — for Anthropic, this is **Claude Sonnet 5**, used by default and **not user-changeable**. Synthetic ticket generation is high-volume and doesn't need a flagship reasoning model, so the choice is fixed to keep runs fast and cheap.
 
 ### Settings
 

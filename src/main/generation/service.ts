@@ -34,7 +34,9 @@ export class GenerationService {
     private readonly settings: SettingsStore,
     private readonly secrets: SecretStore,
     private readonly userData: string,
-    private readonly appVersion: string
+    private readonly appVersion: string,
+    /** Injectable clock (ms) so runs are deterministic under test. */
+    private readonly now: () => number = () => Date.now()
   ) {}
 
   async estimate(): Promise<CostEstimate> {
@@ -47,21 +49,34 @@ export class GenerationService {
   }
 
   async start(onProgress: (p: GenerationProgress) => void): Promise<GenerationRunResult> {
+    // Claim the single-run slot synchronously, before any await, so two racing start() calls
+    // can't both slip past the guard during the awaits below.
     if (this.active) throw new Error('A generation is already running.')
+    const controller = new AbortController()
+    this.active = controller
 
+    try {
+      return await this.run(controller, onProgress)
+    } finally {
+      this.active = null
+    }
+  }
+
+  private async run(
+    controller: AbortController,
+    onProgress: (p: GenerationProgress) => void
+  ): Promise<GenerationRunResult> {
     const settings = await this.settings.get()
     const provider = await createProvider(settings, (p) => this.secrets.getKey(p))
     const { batchSize, concurrency } = runParams(settings)
     const estimate = estimateRun(settings, batchSize)
-    const controller = new AbortController()
-    this.active = controller
-    const startedAt = Date.now()
+    const startedAt = this.now()
     const store = new TicketStore(resolveOutputDir(settings, this.userData))
 
     const buildFile = (snapshot: Pick<BatchSnapshot, 'tickets' | 'usage'>): TicketFile => {
       const { inputTokens, outputTokens, batches } = snapshot.usage
       const meta: TicketsMeta = {
-        generatedAt: new Date().toISOString(),
+        generatedAt: new Date(this.now()).toISOString(),
         appVersion: this.appVersion,
         provider: provider.id,
         model: provider.model,
@@ -76,7 +91,7 @@ export class GenerationService {
           estimatedCostUsd: estimate.estimatedCostUsd,
           actualCostUsd: costForUsage(provider.id, { inputTokens, outputTokens }),
           pricing: getPricing(provider.id),
-          durationMs: Date.now() - startedAt
+          durationMs: this.now() - startedAt
         }
       }
       return { meta, tickets: snapshot.tickets }
@@ -104,26 +119,23 @@ export class GenerationService {
       return writing
     }
 
-    try {
-      const run = await runGeneration({
-        provider,
-        settings,
-        signal: controller.signal,
-        batchSize,
-        concurrency,
-        onProgress,
-        onBatchComplete: (snapshot) => scheduleWrite(buildFile(snapshot))
-      })
+    const run = await runGeneration({
+      provider,
+      settings,
+      signal: controller.signal,
+      batchSize,
+      concurrency,
+      now: startedAt,
+      onProgress,
+      onBatchComplete: (snapshot) => scheduleWrite(buildFile(snapshot))
+    })
 
-      // Drain any final coalesced write before the authoritative write below.
-      if (writing) await writing
+    // Drain any final coalesced write before the authoritative write below.
+    if (writing) await writing
 
-      const file = buildFile({ tickets: run.tickets, usage: run.usage })
-      const filePath = await store.write(file)
-      await this.settings.set({ lastOutputPath: filePath })
-      return { filePath, cancelled: run.cancelled, file }
-    } finally {
-      this.active = null
-    }
+    const file = buildFile({ tickets: run.tickets, usage: run.usage })
+    const filePath = await store.write(file)
+    await this.settings.set({ lastOutputPath: filePath })
+    return { filePath, cancelled: run.cancelled, file }
   }
 }

@@ -1,7 +1,7 @@
 # electron-builder configuration.
 # v0: UNSIGNED builds (no Apple Developer ID / Windows cert yet) and manual updates.
-appId: com.brianlevine.ticketgenerator
-productName: Ticket Generator
+appId: com.brianlevine.qbort
+productName: Qbort
 copyright: Copyright © 2026 Brian Levine
 
 directories:
@@ -49,6 +49,6 @@ linux:
 # Update owner/repo to match your GitHub remote. releaseType:draft lets you review before publishing.
 publish:
   provider: github
-  owner: CHANGE_ME # your GitHub username or org
-  repo: ticket-generator
+  owner: balevine
+  repo: qbort
   releaseType: draft

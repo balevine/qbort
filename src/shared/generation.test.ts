@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_BATCH_SIZE,
   MAX_OUTPUT_TOKENS_CEILING,
+  OUTPUT_TOKENS_PER_TICKET,
   effectiveBatchSize,
   estimatedTokensPerTicket,
-  maxOutputTokensForBatch
+  expectedBatchOutputTokens,
+  maxOutputTokensForBatch,
+  maxOutputTokensForExpected
 } from './generation'
 
 describe('effectiveBatchSize', () => {
@@ -33,5 +36,25 @@ describe('maxOutputTokensForBatch', () => {
 
   it('clamps to the ceiling for very large batches', () => {
     expect(maxOutputTokensForBatch(500, estimatedTokensPerTicket(true, 20))).toBe(MAX_OUTPUT_TOKENS_CEILING)
+  })
+})
+
+describe('expectedBatchOutputTokens', () => {
+  it('uses only the per-ticket base when staff responses are off', () => {
+    expect(expectedBatchOutputTokens(5, false, 20)).toBe(5 * OUTPUT_TOKENS_PER_TICKET)
+  })
+
+  it('prefers the sum of the actual sampled counts over the flat average', () => {
+    // Same average (2/ticket) but a chattier actual draw must budget for more output.
+    const avgBased = expectedBatchOutputTokens(4, true, 2)
+    const drawBased = expectedBatchOutputTokens(4, true, 2, [5, 4, 6, 3]) // sum 18 ≫ 8
+    expect(drawBased).toBeGreaterThan(avgBased)
+  })
+})
+
+describe('maxOutputTokensForExpected', () => {
+  it('applies a margin above a floor and clamps to the ceiling', () => {
+    expect(maxOutputTokensForExpected(10)).toBeGreaterThanOrEqual(1024)
+    expect(maxOutputTokensForExpected(10_000_000)).toBe(MAX_OUTPUT_TOKENS_CEILING)
   })
 })

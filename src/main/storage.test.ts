@@ -70,6 +70,15 @@ describe('TicketStore', () => {
     expect(await TicketStore.readFile(join(dir, 'bad.json'))).toBeNull()
   })
 
+  it('returns null for an old pre-messages[] file so the viewer falls back to empty state', async () => {
+    const legacy = {
+      meta: sampleFile.meta,
+      tickets: [{ id: 'T-1', subject: 's', body: 'b', status: 'new', from: { name: 'n', email: 'e@x.com' }, responses: [] }]
+    }
+    await fs.writeFile(join(dir, 'legacy.json'), JSON.stringify(legacy), 'utf-8')
+    expect(await TicketStore.readFile(join(dir, 'legacy.json'))).toBeNull()
+  })
+
   it('overwrites atomically on repeated writes', async () => {
     const store = new TicketStore(dir)
     await store.write(sampleFile)

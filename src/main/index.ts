@@ -10,13 +10,18 @@ const isDev = !app.isPackaged
  * production locks everything down to local resources. All external network calls happen
  * in the main process, so the renderer never needs a broad `connect-src`.
  */
+// Shared hardening directives: no plugins, no embedding, no `<base>` hijack, no form posts.
+// All network calls happen in main, so the renderer never needs to embed or submit anywhere.
+const CSP_LOCKS = ["object-src 'none'", "base-uri 'none'", "frame-src 'none'", "form-action 'none'"]
+
 const CSP_DEV = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' http://localhost:*",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "font-src 'self' data:",
-  "connect-src 'self' ws://localhost:* http://localhost:*"
+  "connect-src 'self' ws://localhost:* http://localhost:*",
+  ...CSP_LOCKS
 ].join('; ')
 
 const CSP_PROD = [
@@ -25,7 +30,8 @@ const CSP_PROD = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "font-src 'self' data:",
-  "connect-src 'self'"
+  "connect-src 'self'",
+  ...CSP_LOCKS
 ].join('; ')
 
 function createWindow(): void {
@@ -36,7 +42,7 @@ function createWindow(): void {
     minHeight: 620,
     show: false,
     backgroundColor: '#ffffff',
-    title: 'Ticket Generator',
+    title: 'Qbort',
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

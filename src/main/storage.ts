@@ -1,5 +1,6 @@
 import { join } from 'path'
 import type { Settings, TicketFile } from '@shared/types'
+import { parseTicketFile } from '@shared/ticketFile'
 import { atomicWriteJson, readJson } from './fsUtil'
 
 export const DEFAULT_TICKETS_FILENAME = 'tickets.json'
@@ -23,9 +24,12 @@ export class TicketStore {
     return this.filePath
   }
 
-  /** Read + parse a tickets file by absolute path. Returns null if missing/invalid. */
+  /**
+   * Read + parse a tickets file by absolute path. Returns null if it's missing, unparseable, or
+   * doesn't match the current schema (e.g. an old pre-`messages[]` file) — callers treat null as
+   * "no file", so a stale/incompatible file falls back to the empty state instead of crashing.
+   */
   static async readFile(path: string): Promise<TicketFile | null> {
-    const parsed = await readJson<TicketFile>(path)
-    return parsed && typeof parsed === 'object' && Array.isArray(parsed.tickets) ? parsed : null
+    return parseTicketFile(await readJson(path))
   }
 }

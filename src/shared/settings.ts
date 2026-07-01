@@ -103,7 +103,17 @@ export function withDefaults(raw: unknown): Settings {
   }
 }
 
-/** Shallow-merge a partial update over the current settings (nested objects replaced whole). */
+/**
+ * Merge a partial update over the current settings, then re-clamp. Nested `generation`/`ollama`
+ * objects are merged field-by-field so updating one field (e.g. `numTickets`) preserves the
+ * siblings instead of resetting them to defaults; `staffRoster` is replaced wholesale (the UI
+ * always sends the full roster).
+ */
 export function mergeSettings(current: Settings, partial: Partial<Settings>): Settings {
-  return withDefaults({ ...current, ...partial })
+  return withDefaults({
+    ...current,
+    ...partial,
+    generation: { ...current.generation, ...partial.generation },
+    ollama: { ...current.ollama, ...partial.ollama }
+  })
 }

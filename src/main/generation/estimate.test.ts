@@ -22,7 +22,7 @@ describe('estimateRun', () => {
   it('produces a positive cost and the curated model for a hosted provider', () => {
     const est = estimateRun(settings('anthropic', { numTickets: 100 }))
     expect(est.estimatedCostUsd).toBeGreaterThan(0)
-    expect(est.model).toBe('claude-sonnet-4-6')
+    expect(est.model).toBe('claude-sonnet-5')
     expect(est.estimatedTotalTokens).toBe(est.estimatedInputTokens + est.estimatedOutputTokens)
   })
 

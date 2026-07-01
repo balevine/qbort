@@ -1,4 +1,10 @@
-import type { GenerateBatchArgs, GenerateBatchResult, LLMProvider } from './types'
+import {
+  ProviderError,
+  TruncationError,
+  type GenerateBatchArgs,
+  type GenerateBatchResult,
+  type LLMProvider
+} from './types'
 import { SYSTEM_PROMPT, TEMPERATURE, errorFromResponse, extractJson, resolveMaxTokens } from './common'
 import { normalizeHost } from '../../connection'
 
@@ -17,6 +23,10 @@ interface OllamaChatChunk {
   prompt_eval_count?: number
   eval_count?: number
   done?: boolean
+  /** Set to `length` when generation stopped at `num_predict` (truncated output). */
+  done_reason?: string
+  /** Ollama reports errors as a field on a 200 stream chunk, not an HTTP status. */
+  error?: string
 }
 
 /** Local Ollama server via /api/chat. Streams NDJSON so we can report live token progress. */
@@ -67,8 +77,12 @@ export class OllamaProvider implements LLMProvider {
     let promptTokens = 0
     let outputTokens = 0
     let chunks = 0
+    let truncated = false
 
     const handle = (chunk: OllamaChatChunk) => {
+      // Ollama streams errors (e.g. model failed to load) as a field on a 200 response.
+      if (chunk.error) throw new ProviderError(`ollama: ${chunk.error}`, 'ollama', undefined, false)
+      if (chunk.done_reason === 'length') truncated = true
       const piece = chunk.message?.content
       if (piece) {
         content += piece
@@ -77,6 +91,19 @@ export class OllamaProvider implements LLMProvider {
       }
       if (typeof chunk.prompt_eval_count === 'number') promptTokens = chunk.prompt_eval_count
       if (typeof chunk.eval_count === 'number') outputTokens = chunk.eval_count
+    }
+
+    // Parse one NDJSON line. A single malformed/partial line (proxy chunking, keep-alive noise)
+    // must not abort the whole batch — skip it and keep reading. Chunks carrying an `error` field
+    // still throw (via `handle`) since those are real provider failures.
+    const handleLine = (line: string) => {
+      let chunk: OllamaChatChunk
+      try {
+        chunk = JSON.parse(line) as OllamaChatChunk
+      } catch {
+        return
+      }
+      handle(chunk)
     }
 
     // Stream NDJSON line-by-line. Fall back to a buffered read if the body isn't streamable.
@@ -92,19 +119,23 @@ export class OllamaProvider implements LLMProvider {
         while ((nl = buffer.indexOf('\n')) >= 0) {
           const line = buffer.slice(0, nl).trim()
           buffer = buffer.slice(nl + 1)
-          if (line) handle(JSON.parse(line) as OllamaChatChunk)
+          if (line) handleLine(line)
         }
         if (done) break
       }
       const tail = buffer.trim()
-      if (tail) handle(JSON.parse(tail) as OllamaChatChunk)
+      if (tail) handleLine(tail)
     } else {
       const text = await res.text()
       for (const line of text.split('\n')) {
         const l = line.trim()
-        if (l) handle(JSON.parse(l) as OllamaChatChunk)
+        if (l) handleLine(l)
       }
     }
+
+    // A length-truncated stream leaves the JSON incomplete; surface it so the orchestrator can
+    // grow the budget or split the batch rather than dropping it on a doomed parse.
+    if (truncated) throw new TruncationError('ollama')
 
     return {
       raw: extractJson(content),

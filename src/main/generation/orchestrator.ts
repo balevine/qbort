@@ -1,15 +1,16 @@
 import type { GenerationProgress, Settings, Ticket } from '@shared/types'
 import {
   DEFAULT_BATCH_SIZE,
+  MAX_OUTPUT_TOKENS_CEILING,
   effectiveBatchSize,
-  estimatedTokensPerTicket,
-  maxOutputTokensForBatch
+  expectedBatchOutputTokens,
+  maxOutputTokensForExpected
 } from '@shared/generation'
 import { compilePromptParts } from '@shared/promptCompiler'
 import { ensureRoster, sampleResponseCounts } from '@shared/staff'
 import { openingTimesForRun } from '@shared/time'
 import { assembleTickets, validateTickets, type TimeContext } from './validate'
-import { ProviderError, type GenerateBatchResult, type LLMProvider } from './providers'
+import { ProviderError, TruncationError, type GenerateBatchResult, type LLMProvider } from './providers'
 
 /** Snapshot passed to `onBatchComplete` so the caller can persist incrementally. */
 export interface BatchSnapshot {
@@ -91,11 +92,26 @@ async function generateBatchWithRetry(
   onToken: (info: { outputTokens: number }) => void
 ): Promise<GenerateBatchResult> {
   let attempt = 0
+  let maxOutputTokens = batchArgs.maxOutputTokens
   for (;;) {
     try {
-      return await provider.generateBatch({ ...batchArgs, signal, onToken })
+      return await provider.generateBatch({ ...batchArgs, maxOutputTokens, signal, onToken })
     } catch (err) {
       if (signal.aborted) throw err
+      // Truncation: retrying with the same budget just truncates again. Grow `max_tokens` first;
+      // once we're at the ceiling, give up here so the caller can split the batch into smaller
+      // ones that fit. (An undefined budget can't be grown — split immediately.)
+      if (err instanceof TruncationError) {
+        if (maxOutputTokens !== undefined && maxOutputTokens < MAX_OUTPUT_TOKENS_CEILING && attempt < maxRetries) {
+          maxOutputTokens = Math.min(MAX_OUTPUT_TOKENS_CEILING, Math.ceil(maxOutputTokens * 1.5))
+          attempt++
+          onRetry()
+          await sleep(backoffWithJitter(attempt, rng), signal)
+          if (signal.aborted) throw err
+          continue
+        }
+        throw err
+      }
       // ProviderError carries an explicit retryable flag (429/5xx). Anything else
       // (e.g. malformed JSON) is worth re-rolling a few times.
       const canRetry = err instanceof ProviderError ? err.retryable : true
@@ -103,6 +119,8 @@ async function generateBatchWithRetry(
       attempt++
       onRetry()
       await sleep(backoffWithJitter(attempt, rng), signal)
+      // Cancellation can land while we were backing off — don't fire another request.
+      if (signal.aborted) throw err
     }
   }
 }
@@ -124,7 +142,6 @@ export async function runGeneration(deps: RunGenerationDeps): Promise<RunGenerat
   const gen = settings.generation
   const total = Math.max(0, gen.numTickets)
   const roster = ensureRoster(settings.staffRoster, gen.numStaffMembers)
-  const tokensPerTicket = estimatedTokensPerTicket(gen.includeStaffResponses, gen.avgStaffResponses)
 
   // Pre-pick sorted opening times for the whole run and hand them out by id, so a ticket's
   // creation time rises with its id (ids beyond the requested count fall back to "now").
@@ -180,16 +197,27 @@ export async function runGeneration(deps: RunGenerationDeps): Promise<RunGenerat
 
   emit()
 
-  const worker = async (spec: { id: number; count: number }): Promise<void> => {
-    if (signal.aborted) return
-
+  // Produce one batch of `count` tickets under the given progress key, appending them to the run.
+  // If the model truncates even at the max token budget, the batch is split in half and each
+  // smaller batch retried — smaller batches produce less output and fit the budget.
+  const collectBatch = async (specId: number, count: number): Promise<void> => {
     const responseCounts = gen.includeStaffResponses
-      ? sampleResponseCounts(spec.count, gen.avgStaffResponses, rng)
+      ? sampleResponseCounts(count, gen.avgStaffResponses, rng)
       : undefined
+
+    // Size the token budget from the *actual* sampled response counts (their sum captures the
+    // Poisson tail a flat average misses), so a batch that drew many chatty tickets isn't
+    // under-budgeted and truncated.
+    const expectedOutput = expectedBatchOutputTokens(
+      count,
+      gen.includeStaffResponses,
+      gen.avgStaffResponses,
+      responseCounts
+    )
 
     const { static: staticPrefix, dynamic: dynamicSuffix } = compilePromptParts({
       editablePrompt: settings.prompt,
-      batchCount: spec.count,
+      batchCount: count,
       staff: {
         include: gen.includeStaffResponses,
         avgResponses: gen.avgStaffResponses,
@@ -198,8 +226,7 @@ export async function runGeneration(deps: RunGenerationDeps): Promise<RunGenerat
       }
     })
 
-    active.set(spec.id, { streamed: 0, target: spec.count * tokensPerTicket, count: spec.count })
-
+    active.set(specId, { streamed: 0, target: expectedOutput, count })
     try {
       const { raw, usage } = await generateBatchWithRetry(
         provider,
@@ -207,8 +234,8 @@ export async function runGeneration(deps: RunGenerationDeps): Promise<RunGenerat
           compiledPrompt: `${staticPrefix}\n\n${dynamicSuffix}`,
           staticPrefix,
           dynamicSuffix,
-          count: spec.count,
-          maxOutputTokens: maxOutputTokensForBatch(spec.count, tokensPerTicket)
+          count,
+          maxOutputTokens: maxOutputTokensForExpected(expectedOutput)
         },
         signal,
         maxRetries,
@@ -218,7 +245,7 @@ export async function runGeneration(deps: RunGenerationDeps): Promise<RunGenerat
           retries++
         },
         ({ outputTokens: streamed }) => {
-          const a = active.get(spec.id)
+          const a = active.get(specId)
           if (a) a.streamed = streamed
           emit()
         }
@@ -228,15 +255,34 @@ export async function runGeneration(deps: RunGenerationDeps): Promise<RunGenerat
 
       const validated = validateTickets(raw, { includeStaffResponses: gen.includeStaffResponses })
       dropped += validated.dropped
-      const assigned = assembleTickets(validated.tickets, nextId, timeCtx)
+      // Never emit more tickets than the batch asked for: extra ids would run past the run's
+      // pre-computed opening-time window and pile up at "now".
+      const capped = validated.tickets.slice(0, count)
+      const assigned = assembleTickets(capped, nextId, timeCtx)
       nextId += assigned.length
       tickets.push(...assigned)
+    } catch (err) {
+      if (err instanceof TruncationError && count > 1 && !signal.aborted) {
+        const half = Math.floor(count / 2)
+        await collectBatch(specId, half)
+        await collectBatch(specId, count - half)
+        return
+      }
+      throw err
+    } finally {
+      active.delete(specId)
+    }
+  }
+
+  const worker = async (spec: { id: number; count: number }): Promise<void> => {
+    if (signal.aborted) return
+    try {
+      await collectBatch(spec.id, spec.count)
     } catch (err) {
       if (!signal.aborted) {
         errors.push(err instanceof Error ? err.message : String(err))
       }
     } finally {
-      active.delete(spec.id)
       processedBatches++
       if (deps.onBatchComplete) {
         // A persistence failure must never abort the run — record it and keep going. The

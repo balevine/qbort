@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AnthropicProvider } from './anthropic'
 import { OllamaProvider } from './ollama'
 import { createProvider } from './index'
-import { ProviderError } from './types'
+import { ProviderError, TruncationError } from './types'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -32,10 +32,10 @@ describe('AnthropicProvider', () => {
           { status: 200 }
         )
     )
-    const result = await new AnthropicProvider('sk-x', 'claude-sonnet-4-6').generateBatch(args)
+    const result = await new AnthropicProvider('sk-x', 'claude-sonnet-5').generateBatch(args)
     expect(lastCall.url).toContain('api.anthropic.com')
     expect(lastCall.init?.headers).toMatchObject({ 'x-api-key': 'sk-x', 'anthropic-version': '2023-06-01' })
-    expect(body().model).toBe('claude-sonnet-4-6')
+    expect(body().model).toBe('claude-sonnet-5')
     expect(body().system[0].cache_control).toEqual({ type: 'ephemeral' })
     expect(result.raw).toEqual({ tickets: [{ subject: 'x' }] })
     expect(result.usage).toEqual({ inputTokens: 100, outputTokens: 250 })
@@ -47,6 +47,23 @@ describe('AnthropicProvider', () => {
       retryable: true,
       status: 429
     })
+  })
+
+  it('throws a retryable TruncationError when the model stops at max_tokens', async () => {
+    stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            content: [{ type: 'text', text: '{"tickets":[{"subject":"x"' }], // truncated JSON
+            stop_reason: 'max_tokens',
+            usage: { input_tokens: 100, output_tokens: 4000 }
+          }),
+          { status: 200 }
+        )
+    )
+    const err = await new AnthropicProvider('k', 'm').generateBatch(args).catch((e) => e)
+    expect(err).toBeInstanceOf(TruncationError)
+    expect(err.retryable).toBe(true)
   })
 })
 
@@ -90,6 +107,34 @@ describe('OllamaProvider', () => {
     expect(result.raw).toEqual({ tickets: [] })
     expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 7 })
   })
+
+  it('skips a malformed NDJSON line instead of dropping the whole batch', async () => {
+    const ndjson = [
+      JSON.stringify({ message: { content: '{"tickets"' } }),
+      'not-json-at-all', // proxy noise / partial frame — must be tolerated
+      JSON.stringify({ message: { content: ':[]}' } }),
+      JSON.stringify({ done: true, prompt_eval_count: 9, eval_count: 3 })
+    ].join('\n')
+    stubFetch(() => new Response(ndjson, { status: 200 }))
+
+    const result = await new OllamaProvider('http://localhost:11434', 'm').generateBatch({ compiledPrompt: 'p', count: 1 })
+    expect(result.raw).toEqual({ tickets: [] })
+    expect(result.usage).toEqual({ inputTokens: 9, outputTokens: 3 })
+  })
+
+  it('surfaces an error field on a 200 stream as a ProviderError', async () => {
+    stubFetch(() => new Response(JSON.stringify({ error: 'model not found' }), { status: 200 }))
+    await expect(new OllamaProvider('http://localhost:11434', 'm').generateBatch({ compiledPrompt: 'p', count: 1 })).rejects.toBeInstanceOf(ProviderError)
+  })
+
+  it('throws a TruncationError when the stream stops at the output-token limit', async () => {
+    const ndjson = [
+      JSON.stringify({ message: { content: '{"tickets":[{"subject":"x"' } }),
+      JSON.stringify({ done: true, done_reason: 'length', prompt_eval_count: 10, eval_count: 4000 })
+    ].join('\n')
+    stubFetch(() => new Response(ndjson, { status: 200 }))
+    await expect(new OllamaProvider('http://localhost:11434', 'm').generateBatch({ compiledPrompt: 'p', count: 5 })).rejects.toBeInstanceOf(TruncationError)
+  })
 })
 
 describe('createProvider', () => {
@@ -112,7 +157,7 @@ describe('createProvider', () => {
     const settings = { ...DEFAULT_SETTINGS, providerId: 'anthropic' as const }
     const provider = await createProvider(settings, someKey)
     expect(provider.id).toBe('anthropic')
-    expect(provider.model).toBe('claude-sonnet-4-6')
+    expect(provider.model).toBe('claude-sonnet-5')
 
     await expect(createProvider(settings, noKey)).rejects.toMatchObject({ provider: 'anthropic' })
   })

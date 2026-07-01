@@ -14,6 +14,7 @@ import { useSettings } from '@/state/SettingsContext'
 import { useSecretStatus } from '@/lib/useSecretStatus'
 import {
   ALL_PROVIDERS,
+  HOSTED_MODEL_LABELS,
   PROVIDER_LABELS,
   isHostedProvider,
   type ConnectionTestResult,
@@ -107,9 +108,21 @@ export function ProviderConfig() {
         ))}
       </div>
 
-      {/* Hosted: API key */}
+      {/* Hosted: fixed model + API key */}
       {hosted ? (
-        <div className="space-y-2">
+        <div className="space-y-3">
+          {/* The model is curated and not user-selectable for hosted providers (§5). */}
+          <div className="border-2 border-ink px-3 py-2">
+            <div className="font-mono text-[10px] font-bold uppercase tracking-widest text-ink/50">
+              Model
+            </div>
+            <div className="font-mono text-xs font-bold uppercase tracking-wide text-ink">
+              {HOSTED_MODEL_LABELS[active] ?? 'Auto-selected'}
+            </div>
+            <div className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-ink/50">
+              Used by default · not user-selectable
+            </div>
+          </div>
           <div className="flex items-center justify-between">
             <Label>API key</Label>
             <span

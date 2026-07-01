@@ -8,7 +8,7 @@ import {
   type TicketStatus
 } from '@shared/types'
 import { isStaffEmail } from '@shared/staff'
-import { messageTimestamps } from '@shared/time'
+import { isRecentOpening, messageTimestamps } from '@shared/time'
 
 /** A message before the app assigns its `createdAt`. */
 export type DraftMessage = Omit<TicketMessage, 'createdAt'>
@@ -82,9 +82,12 @@ export function repairTicket(raw: unknown, opts: ValidateOptions): DraftTicket |
   if (!parsed.success) return null
   const t = parsed.data
 
-  // The opening message is the customer's — a ticket needs its content + an author.
+  // The opening message is the customer's — a ticket needs its content + an author. Its role is
+  // fixed to customer regardless of the email domain (the app never trusts the model for role),
+  // so a model that slips a `@company.biz` address onto the opener can't mislabel it as staff.
   const opening = repairMessage({ body: t.body, from: t.from })
   if (!opening) return null
+  opening.isStaff = false
 
   const subject = (t.subject ?? '').trim() || opening.body.split('\n')[0].slice(0, 80) || '(no subject)'
 
@@ -133,12 +136,16 @@ export function validateTickets(input: unknown, opts: ValidateOptions): Validate
 export function assembleTickets(drafts: DraftTicket[], start: number, time: TimeContext): Ticket[] {
   return drafts.map((draft, i) => {
     const id = start + i
-    const times = messageTimestamps(draft.messages.length, time.openingMsForId(id), time.nowMs, time.rng)
+    const openingMs = time.openingMsForId(id)
+    // A ticket opened in the last few minutes hasn't had time for a reply yet — keep only the
+    // opening message. This also stops reply timestamps from bunching up against `now`.
+    const messages = isRecentOpening(openingMs, time.nowMs) ? draft.messages.slice(0, 1) : draft.messages
+    const times = messageTimestamps(messages.length, openingMs, time.nowMs, time.rng)
     return {
       id,
       subject: draft.subject,
       status: draft.status,
-      messages: draft.messages.map((m, j) => ({ ...m, createdAt: times[j] }))
+      messages: messages.map((m, j) => ({ ...m, createdAt: times[j] }))
     }
   })
 }

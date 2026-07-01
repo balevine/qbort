@@ -60,7 +60,7 @@ export function TicketsView() {
   const exportFile = async () => {
     if (!filePath) return
     try {
-      const dest = await window.api.tickets.export(filePath)
+      const dest = await window.api.tickets.export()
       if (dest) toast(`Exported to ${dest}`)
     } catch (e) {
       toast(errorMessage(e, 'Export failed'), 'error')
