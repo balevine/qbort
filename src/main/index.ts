@@ -1,6 +1,10 @@
 import { app, BrowserWindow, session, shell } from 'electron'
 import { join } from 'path'
 import { registerIpcHandlers } from './ipc'
+// 1024x1024 app icon from build/. electron-vite copies it into out/ so it's
+// available at runtime; electron-builder also uses build/icon.png for the
+// packaged app's icon. Replace build/icon.png with real art (it's a placeholder).
+import icon from '../../build/icon.png?asset'
 
 const isDev = !app.isPackaged
 
@@ -43,6 +47,7 @@ function createWindow(): void {
     show: false,
     backgroundColor: '#ffffff',
     title: 'Qbort',
+    icon,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

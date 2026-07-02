@@ -4,6 +4,8 @@ A local-first desktop app that generates realistic, **fake customer-support tick
 
 Everything runs on your machine. The app only reaches out to the network to make the LLM call itself; generated tickets are written to a plain JSON file you can view in-app and export.
 
+![Qbort screenshot](docs/screenshot.png)
+
 **Highlights**
 
 - Two providers: **Ollama** (local, default) and **Anthropic**. (OpenAI and Google Gemini support is planned for a future release.)
