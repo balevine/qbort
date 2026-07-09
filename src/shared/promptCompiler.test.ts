@@ -44,6 +44,17 @@ describe('compilePrompt', () => {
     expect(out).toContain('Average staff responses per ticket: ~2')
   })
 
+  it('forbids introducing other customers into a ticket thread', () => {
+    const out = compilePrompt({
+      editablePrompt: '',
+      batchCount: 3,
+      staff: { include: true, avgResponses: 2, roster }
+    })
+    // The failure we guard against: responses filled with unrelated messages from other customers.
+    expect(out).toContain('messages from other customers')
+    expect(out).toContain('never introduce a different customer')
+  })
+
   it('emits per-ticket targets when responseCounts are provided', () => {
     const out = compilePrompt({
       editablePrompt: '',

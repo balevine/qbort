@@ -2,6 +2,7 @@ import type { GenerationProgress, Settings, Ticket } from '@shared/types'
 import {
   DEFAULT_BATCH_SIZE,
   MAX_OUTPUT_TOKENS_CEILING,
+  MAX_TOPUP_ROUNDS,
   effectiveBatchSize,
   expectedBatchOutputTokens,
   maxOutputTokensForExpected
@@ -156,17 +157,26 @@ export async function runGeneration(deps: RunGenerationDeps): Promise<RunGenerat
   // fits the model's budget and doesn't get truncated (which would drop the whole batch).
   const effBatchSize = effectiveBatchSize(batchSize, gen.includeStaffResponses, gen.avgStaffResponses)
 
-  // Split into batch specs.
-  const specs: Array<{ id: number; count: number }> = []
-  for (let start = 0; start < total; start += effBatchSize) {
-    specs.push({ id: specs.length, count: Math.min(effBatchSize, total - start) })
+  // Split a count of tickets into batch specs of at most `effBatchSize`. Spec ids are unique
+  // across the whole run (including top-up rounds) since they key the in-flight progress map.
+  let specSeq = 0
+  const buildSpecs = (count: number): Array<{ id: number; count: number }> => {
+    const out: Array<{ id: number; count: number }> = []
+    for (let start = 0; start < count; start += effBatchSize) {
+      out.push({ id: specSeq++, count: Math.min(effBatchSize, count - start) })
+    }
+    return out
   }
+
+  const initialSpecs = buildSpecs(total)
 
   const tickets: Ticket[] = []
   let nextId = 1
   let inputTokens = 0
   let outputTokens = 0
   let processedBatches = 0
+  // Total planned batches; grows as top-up rounds are scheduled after validation shortfalls.
+  let batchesTotal = initialSpecs.length
   let dropped = 0
   let retries = 0
   const errors: string[] = []
@@ -186,7 +196,7 @@ export async function runGeneration(deps: RunGenerationDeps): Promise<RunGenerat
       ticketsDone: tickets.length,
       ticketsTotal: total,
       batchesDone: processedBatches,
-      batchesTotal: specs.length,
+      batchesTotal,
       retries,
       dropped,
       errors: errors.slice(),
@@ -304,16 +314,33 @@ export async function runGeneration(deps: RunGenerationDeps): Promise<RunGenerat
     }
   }
 
-  // Concurrency pool: workers pull the next spec until exhausted or aborted.
-  let idx = 0
-  const runner = async (): Promise<void> => {
-    while (idx < specs.length) {
-      if (signal.aborted) return
-      const spec = specs[idx++]
-      await worker(spec)
+  // Concurrency pool: workers pull the next spec of a round until it's exhausted or aborted.
+  const runSpecs = async (roundSpecs: Array<{ id: number; count: number }>): Promise<void> => {
+    let idx = 0
+    const runner = async (): Promise<void> => {
+      while (idx < roundSpecs.length) {
+        if (signal.aborted) return
+        await worker(roundSpecs[idx++])
+      }
     }
+    await Promise.all(Array.from({ length: Math.min(concurrency, roundSpecs.length) }, runner))
   }
-  await Promise.all(Array.from({ length: Math.min(concurrency, specs.length) }, runner))
+
+  await runSpecs(initialSpecs)
+
+  // Validation drops malformed tickets, so a pass can keep fewer than requested. Re-count and
+  // generate just the shortfall — re-validating only those new tickets — for up to
+  // MAX_TOPUP_ROUNDS rounds, or until we hit the requested count (or the run is cancelled). Each
+  // round requests exactly the shortfall and every batch is capped to its own count, so the kept
+  // total never exceeds `total` and ids stay within the pre-computed opening-time window.
+  for (let round = 0; round < MAX_TOPUP_ROUNDS && !signal.aborted; round++) {
+    const shortfall = total - tickets.length
+    if (shortfall <= 0) break
+    const topUpSpecs = buildSpecs(shortfall)
+    batchesTotal += topUpSpecs.length
+    emit()
+    await runSpecs(topUpSpecs)
+  }
 
   return {
     tickets,

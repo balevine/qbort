@@ -28,6 +28,7 @@ A local-first **Electron desktop app** that generates fake customer-support tick
 - Every module in `shared/` and `main/` ships a colocated `*.test.ts` (**Vitest**). Tests are deterministic: no real network (providers mocked), `safeStorage` faked, and `rng`/`now`/`sleep` are injectable — keep them that way.
 - Prefer pure, testable helpers; keep side effects (fs, fetch, Electron) at the edges. Writes go through `fsUtil.atomicWriteJson`.
 - Comments explain **why**, not what; match the surrounding density.
+- When writing comments and markdown files, prefer periods and parenthesis over semi-colons and em-dashes.
 
 ## Visual design
 

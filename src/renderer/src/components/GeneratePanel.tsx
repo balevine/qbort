@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { AlertTriangle, Loader2, Play, Square, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PulseDot } from '@/components/ui/pulse-dot'
@@ -12,17 +13,32 @@ import { PROVIDER_LABELS } from '@shared/types'
 
 interface GeneratePanelProps {
   onViewResults: () => void
+  onClose: () => void
 }
 
-export function GeneratePanel({ onViewResults }: GeneratePanelProps) {
+export function GeneratePanel({ onViewResults, onClose }: GeneratePanelProps) {
   const { settings } = useSettings()
   const { phase, estimate, progress, summary, error, elapsed, beginEstimate, confirmRun, cancel, reset } =
     useGeneration()
   const { secretStatus } = useSecretStatus()
 
-  if (!settings) return null
+  const readiness = settings ? providerReadiness(settings, secretStatus) : null
 
-  const readiness = providerReadiness(settings, secretStatus)
+  // Fresh start whenever the modal opens (this panel mounts on open) — unless a run is still
+  // streaming, in which case we keep showing its live progress.
+  useEffect(() => {
+    if (phase !== 'running') reset()
+    // Only on open; reacting to `phase` would wipe a completed run's result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // No separate "generate" click: as soon as we're idle and the provider is ready, jump straight
+  // to the cost estimate. A not-ready provider stays idle so we can show the reason below.
+  useEffect(() => {
+    if (phase === 'idle' && readiness?.ready) void beginEstimate()
+  }, [phase, readiness?.ready, beginEstimate])
+
+  if (!settings || !readiness) return null
 
   // Prefer the estimated fraction (includes in-flight streaming) so the bar moves during a
   // single batch; fall back to the committed ticket ratio.
@@ -66,8 +82,8 @@ export function GeneratePanel({ onViewResults }: GeneratePanelProps) {
             <Play className="h-4 w-4" />
             Start generation
           </Button>
-          <Button variant="ghost" onClick={reset}>
-            Back
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
           </Button>
         </div>
       </div>
@@ -158,25 +174,21 @@ export function GeneratePanel({ onViewResults }: GeneratePanelProps) {
     )
   }
 
-  // --- Idle ---
+  // --- Idle (transient) / estimating ---
+  // Opening the modal lands here and auto-advances to the confirm gate. If the provider isn't
+  // ready, we can't estimate — show why instead.
+  if (!readiness.ready) {
+    return (
+      <p className="flex items-start gap-1.5 text-xs text-ink/70">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        {readiness.reason}
+      </p>
+    )
+  }
   return (
-    <div className="space-y-2">
-      <Button
-        variant="solid"
-        onClick={beginEstimate}
-        disabled={phase === 'estimating' || !readiness.ready}
-      >
-        {phase === 'estimating' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-        Generate tickets
-      </Button>
-      {readiness.ready ? (
-        <p className="text-[11px] text-ink/50">You'll see a cost estimate to confirm before anything runs.</p>
-      ) : (
-        <p className="flex items-start gap-1.5 text-[11px] text-ink/70">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          {readiness.reason}
-        </p>
-      )}
+    <div className="flex items-center gap-2 font-mono text-xs text-ink/60">
+      <Loader2 className="h-4 w-4 animate-spin" />
+      Estimating cost…
     </div>
   )
 }
