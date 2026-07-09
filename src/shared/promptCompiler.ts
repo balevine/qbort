@@ -25,7 +25,7 @@ export const OUTPUT_SHAPE = `{
       "status": "one of: ${TICKET_STATUSES.join(' | ')}",
       "from": { "name": "string — customer full name", "email": "string — customer email (NOT on ${STAFF_EMAIL_DOMAIN})" },
       "responses": [
-        { "body": "string — reply text", "from": { "name": "string", "email": "string" } }
+        { "body": "string — staff reply to this customer, same conversation", "from": { "name": "string — staff member's name", "email": "string — staff member's @${STAFF_EMAIL_DOMAIN} email" } }
       ]
     }
   ]
@@ -54,8 +54,12 @@ function staffStaticSection(staff: CompilePromptInput['staff']): string {
 
   const lines = [
     'STAFF RESPONSES: ENABLED.',
-    `- All staff replies MUST be authored by a roster member, using their @${STAFF_EMAIL_DOMAIN} email.`,
-    `- The opening message and any customer follow-ups must NOT use a @${STAFF_EMAIL_DOMAIN} email.`,
+    `- Each ticket's "responses" is the reply thread for THAT ONE ticket: staff replying to the`,
+    `  SAME customer about the SAME issue, in order. A ticket is one conversation — never fill`,
+    `  "responses" with unrelated issues, new complaints, or messages from other customers.`,
+    `- Every staff reply MUST be authored by a roster member below, using their @${STAFF_EMAIL_DOMAIN} email.`,
+    `- The only non-staff message allowed in a thread is the SAME customer (the opener's exact name`,
+    `  and email) following up — never introduce a different customer inside "responses".`,
     '',
     'Staff roster:',
     roster || '  (none provided)'
