@@ -1,6 +1,14 @@
 /** How many tickets to request per LLM call. Used by the prompt preview and the orchestrator. */
 export const DEFAULT_BATCH_SIZE = 20
 
+/**
+ * Post-validation top-up rounds. Validation drops malformed tickets, so a pass can yield fewer
+ * than requested. After the initial pass the orchestrator re-counts and generates just the
+ * shortfall, re-validating only the new tickets, for up to this many additional rounds — or until
+ * the requested count is reached. A small cap bounds cost when a model keeps producing junk.
+ */
+export const MAX_TOPUP_ROUNDS = 3
+
 /** Upper bound on staff responses targeted for any single ticket (keeps prompts sane). */
 export const MAX_RESPONSES_PER_TICKET = 30
 

@@ -48,6 +48,35 @@ function fakeProvider(
   return provider
 }
 
+/**
+ * A provider that returns `count` tickets per call but marks some invalid (no email → dropped in
+ * validation). `dropPerCall(callIndex, count)` says how many of that call's tickets to spoil.
+ */
+function droppingProvider(
+  dropPerCall: (callIndex: number, count: number) => number
+): LLMProvider & { calls: number } {
+  let calls = 0
+  const provider = {
+    id: 'ollama' as const,
+    model: 'test-model',
+    calls: 0,
+    async generateBatch({ count }: { count: number }): Promise<GenerateBatchResult> {
+      const idx = calls++
+      provider.calls = calls
+      const drop = dropPerCall(idx, count)
+      const tickets = Array.from({ length: count }, (_, i) => ({
+        subject: `Subject ${idx}-${i}`,
+        body: `Body ${idx}-${i}`,
+        status: 'open',
+        // The first `drop` tickets of this call omit the email, so validation drops them.
+        from: i < drop ? { name: `Cust ${idx}-${i}` } : { name: `Cust ${idx}-${i}`, email: `c${idx}-${i}@example.com` }
+      }))
+      return { raw: { tickets }, usage: { inputTokens: 1, outputTokens: 1 } }
+    }
+  }
+  return provider
+}
+
 const noSleep = async () => {}
 
 describe('backoffMs', () => {
@@ -97,8 +126,8 @@ describe('runGeneration', () => {
     expect(result.errors).toHaveLength(0)
   })
 
-  it('gives up on a non-retryable error and keeps partial results', async () => {
-    // Two batches; the first always fails (400), the second succeeds.
+  it('surfaces a non-retryable batch error but tops up the resulting shortfall', async () => {
+    // First batch always fails (400, non-retryable); its 4 missing tickets return via top-up.
     const provider = fakeProvider((idx) => {
       if (idx === 0) throw new ProviderError('bad request', 'ollama', 400, false)
     })
@@ -110,11 +139,11 @@ describe('runGeneration', () => {
       concurrency: 1,
       sleep: noSleep
     })
-    expect(result.errors).toHaveLength(1)
-    expect(result.tickets).toHaveLength(4) // only the second batch
+    expect(result.errors).toHaveLength(1) // the 400 is still recorded
+    expect(result.tickets).toHaveLength(8) // the failed batch's shortfall is refilled
   })
 
-  it('retries non-ProviderError (e.g. bad JSON) up to maxRetries then records an error', async () => {
+  it('retries non-ProviderError (e.g. bad JSON) up to maxRetries, then tops up and retries again', async () => {
     const provider = fakeProvider(() => {
       throw new Error('Model did not return valid JSON')
     })
@@ -126,8 +155,10 @@ describe('runGeneration', () => {
       maxRetries: 2,
       sleep: noSleep
     })
-    expect(result.retries).toBe(2)
-    expect(result.errors).toHaveLength(1)
+    // The batch never succeeds, so each pass exhausts its retries and records an error: the
+    // initial pass plus 3 top-up rounds (MAX_TOPUP_ROUNDS) = 4 passes × 2 retries.
+    expect(result.retries).toBe(8)
+    expect(result.errors).toHaveLength(4)
     expect(result.tickets).toHaveLength(0)
   })
 
@@ -281,6 +312,54 @@ describe('runGeneration', () => {
     })
     expect(result.tickets).toHaveLength(4) // extras dropped, not 7
     expect(result.tickets.map((t) => t.id)).toEqual([1, 2, 3, 4])
+  })
+
+  it('tops up with more batches when validation drops tickets below the requested count', async () => {
+    // First call: 10 requested, 4 spoiled → 6 kept. Later calls: nothing spoiled.
+    const provider = droppingProvider((idx) => (idx === 0 ? 4 : 0))
+    const result = await runGeneration({
+      provider,
+      settings: settingsWith(10),
+      signal: new AbortController().signal,
+      batchSize: 10,
+      concurrency: 1,
+      sleep: noSleep
+    })
+    // Initial batch kept 6; one top-up round of the 4-ticket shortfall filled the rest.
+    expect(result.tickets).toHaveLength(10)
+    expect(result.tickets.map((t) => t.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    expect(result.dropped).toBe(4)
+    expect(provider.calls).toBe(2)
+  })
+
+  it('stops topping up after MAX_TOPUP_ROUNDS even if still short', async () => {
+    // Every ticket is spoiled, so no round ever makes progress.
+    const provider = droppingProvider((_idx, count) => count)
+    const result = await runGeneration({
+      provider,
+      settings: settingsWith(10),
+      signal: new AbortController().signal,
+      batchSize: 10,
+      concurrency: 1,
+      sleep: noSleep
+    })
+    expect(result.tickets).toHaveLength(0)
+    // 1 initial pass + 3 top-up rounds (MAX_TOPUP_ROUNDS), each a single 10-ticket batch.
+    expect(provider.calls).toBe(4)
+  })
+
+  it('does not run any top-up rounds when the first pass already meets the count', async () => {
+    const provider = droppingProvider(() => 0)
+    const result = await runGeneration({
+      provider,
+      settings: settingsWith(10),
+      signal: new AbortController().signal,
+      batchSize: 4,
+      concurrency: 2,
+      sleep: noSleep
+    })
+    expect(result.tickets).toHaveLength(10)
+    expect(provider.calls).toBe(3) // 4 + 4 + 2, no top-up
   })
 
   it('invokes onBatchComplete with growing snapshots', async () => {
