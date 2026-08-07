@@ -90,9 +90,11 @@ describe('GenerationService.start', () => {
     expect(meta.requestedCount).toBe(6)
     expect(meta.generatedCount).toBe(6)
     expect(meta.generatedAt).toBe(new Date(FIXED_NOW).toISOString())
-    expect(meta.usage.durationMs).toBe(0) // clock is constant under test
-    expect(meta.usage.actualCostUsd).toBe(0) // ollama is local/free
-    expect(meta.usage.batches).toBeGreaterThanOrEqual(1)
+    // In-app runs always record usage (only skill-generated files omit it).
+    const usage = meta.usage!
+    expect(usage.durationMs).toBe(0) // clock is constant under test
+    expect(usage.actualCostUsd).toBe(0) // ollama is local/free
+    expect(usage.batches).toBeGreaterThanOrEqual(1)
 
     // The file is on disk and the last-output path is persisted.
     expect(result.filePath).toBe(join(dir, 'tickets.json'))

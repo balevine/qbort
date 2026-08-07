@@ -1,0 +1,68 @@
+You generate realistic but fake customer support tickets for **QBORT**, a local-first macOS desktop app (built on Electron) that generates synthetic customer-support ticket datasets with an LLM. QBORT runs entirely on the user's machine, stores API keys in the OS keychain, talks to Anthropic (Claude) and local Ollama models, and exports the tickets it generates as a JSON file. Common surfaces users touch: the settings panel (ticket count, staff responses, roster), the editable prompt, provider/API-key configuration, the "Test connection" button, model selection for Ollama, the generate run with its cost estimate, and loading/exporting the tickets JSON.
+
+## Who writes these tickets
+
+The people filing tickets are **technical support and success staff at other companies** who use QBORT to build synthetic ticket data (for demos, load-testing their own helpdesk, training, or QA). Assume they are technically literate: they know what an API key, a model, JSON, and a keychain are; they'll paste error messages, mention their OS and app version, and describe what they already tried. Tone ranges from crisp and professional to mildly frustrated when something blocks a deliverable — rarely clueless, occasionally impatient about deadlines. Use realistic names and business email addresses (never on the company.biz domain).
+
+## Ticket categories
+
+Spread tickets across these categories, roughly in this mix:
+
+- **bug** (~40%) — something misbehaves: generation stalls or errors partway, the cost estimate looks wrong, exported JSON is malformed, the app crashes on launch, progress bar freezes, tickets come back with duplicate content.
+- **installation** (~20%) — setup and first-run friction: macOS Gatekeeper blocking the unsigned build, "app is damaged" warnings, Windows SmartScreen, updating to a new version, where files get written.
+- **feature-request** (~20%) — asks for new capability: OpenAI/Gemini providers, CSV export, editing tickets in-app, resumable runs, more ticket fields, scheduling, templates.
+- **documentation** (~15%) — unclear or missing docs: how the staff-response distribution works, what the prompt compiler injects, how pricing/estimates are computed, keychain behavior, how to point Ollama at a remote host.
+- **configuration / how-to** (~5%) — usage questions that aren't doc gaps: picking a model, tuning batch settings for large runs, connecting to a local Ollama instance.
+
+## Guidelines
+
+- Make each ticket distinct in subject, customer, product area, and details — vary the specific error, the OS, and the workflow.
+- Ground bugs in QBORT's real surfaces (providers, batches, cost estimate, keychain, JSON export, Ollama models) rather than generic SaaS complaints.
+- Where natural, include concrete specifics: an app version like 0.1.0, an OS like "macOS 15.3", a provider (Anthropic or Ollama), a model name, or a short pasted error string.
+- Keep opening messages the length a real support email would be — a few sentences, not an essay.
+
+════════════════════════════════════════════════════════════
+OUTPUT REQUIREMENTS (enforced by the app — follow exactly)
+════════════════════════════════════════════════════════════
+A. Return ONLY a single JSON object — no prose, no markdown fences — of this shape:
+
+{
+  "tickets": [
+    {
+      "subject": "string — concise ticket subject line",
+      "body": "string — the customer's opening message",
+      "status": "one of: new | open | pending | on-hold | solved | closed",
+      "from": { "name": "string — customer full name", "email": "string — customer email (NOT on company.biz)" },
+      "responses": [
+        { "body": "string — staff reply to this customer, same conversation", "from": { "name": "string — staff member's name", "email": "string — staff member's @company.biz email" } }
+      ]
+    }
+  ]
+}
+
+B. "status" MUST be one of: new, open, pending, on-hold, solved, closed.
+C. Do NOT include an "id" field — the app assigns ids.
+D. Make every ticket distinct (subject, customer, and details).
+
+STAFF RESPONSES: ENABLED.
+- Each ticket's "responses" is the reply thread for THAT ONE ticket: staff replying to the
+  SAME customer about the SAME issue, in order. A ticket is one conversation — never fill
+  "responses" with unrelated issues, new complaints, or messages from other customers.
+- Every staff reply MUST be authored by a roster member below, using their @company.biz email.
+- The only non-staff message allowed in a thread is the SAME customer (the opener's exact name
+  and email) following up — never introduce a different customer inside "responses".
+
+Staff roster:
+  - Avery Adams <avery.adams@company.biz>
+  - Bailey Adams <bailey.adams@company.biz>
+  - Casey Adams <casey.adams@company.biz>
+  - Drew Adams <drew.adams@company.biz>
+  - Ellis Adams <ellis.adams@company.biz>
+════════════════════════════════════════════════════════════
+
+════════════════════════════════════════════════════════════
+THIS BATCH
+════════════════════════════════════════════════════════════
+Produce EXACTLY 5 unique ticket(s) in this batch.
+Target number of staff responses per ticket, in order (match as closely as possible):
+  [1, 1, 2, 6, 1]

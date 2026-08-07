@@ -72,4 +72,13 @@ describe('parseTicketFile', () => {
     const bad = { ...validFile, meta: { ...validFile.meta, usage: { inputTokens: 0 } } }
     expect(parseTicketFile(bad)).toBeNull()
   })
+
+  it('accepts a skill-generated file with no usage block and the claude-skill provider', () => {
+    const { usage: _usage, ...metaNoUsage } = validFile.meta
+    const skillFile = {
+      ...validFile,
+      meta: { ...metaNoUsage, provider: 'claude-skill', model: 'Claude Code subagents' }
+    }
+    expect(parseTicketFile(skillFile)).toEqual(skillFile)
+  })
 })

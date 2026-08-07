@@ -78,10 +78,12 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
       const result = await window.api.generation.start()
       setFile(result.file, result.filePath)
       const { usage, generatedCount } = result.file.meta
+      // In-app runs always record usage; guard anyway since the field is optional on the type.
+      const usagePart = usage
+        ? ` · ${formatInt(usage.totalTokens)} tokens · ${formatUsd(usage.actualCostUsd)} · ${formatDuration(usage.durationMs)}`
+        : ''
       setSummary(
-        `${formatInt(generatedCount)} tickets · ${formatInt(usage.totalTokens)} tokens · ` +
-          `${formatUsd(usage.actualCostUsd)} · ${formatDuration(usage.durationMs)}` +
-          (result.cancelled ? ' · cancelled' : '')
+        `${formatInt(generatedCount)} tickets${usagePart}` + (result.cancelled ? ' · cancelled' : '')
       )
       setPhase('done')
     } catch (e) {
