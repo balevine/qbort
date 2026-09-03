@@ -22,7 +22,16 @@ const h = vi.hoisted(() => {
   const provider: LLMProvider = {
     id: 'ollama',
     model: 'test-model',
-    generateBatch: (args: GenerateBatchArgs) => generate(args)
+    // The orchestrator opens every run with one scenario call, identifiable by having no
+    // `staticPrefix`. Answer it here so the per-test `generate` overrides below only ever see
+    // ticket batches, and zero its usage so the token/cost assertions stay batch-only.
+    generateBatch: (args: GenerateBatchArgs) =>
+      args.staticPrefix === undefined
+        ? Promise.resolve({
+            raw: { scenarios: Array.from({ length: args.count }, (_, i) => `Scenario ${i + 1}`) },
+            usage: { inputTokens: 0, outputTokens: 0 }
+          })
+        : generate(args)
   }
   return {
     rawTickets,
