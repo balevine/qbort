@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compilePrompt, compilePromptParts } from './promptCompiler'
+import { compilePrompt, compilePromptParts, compileScenarioPrompt, scenarioTarget } from './promptCompiler'
 import { TICKET_STATUSES } from './types'
 
 const roster = [
@@ -101,5 +101,74 @@ describe('compilePromptParts', () => {
     }
     const { static: prefix, dynamic } = compilePromptParts(input)
     expect(compilePrompt(input)).toBe(`${prefix}\n\n${dynamic}`)
+  })
+})
+
+describe('scenarios in the compiled prompt', () => {
+  const base = {
+    editablePrompt: 'CREATIVE',
+    batchCount: 3,
+    staff: { include: false as const, avgResponses: 0, roster: [] }
+  }
+
+  it('numbers the scenarios in the dynamic suffix, pairing each with its ticket', () => {
+    const { dynamic } = compilePromptParts({ ...base, scenarios: ['alpha fails', 'beta hangs', 'gamma 404s'] })
+    expect(dynamic).toContain('  1. alpha fails')
+    expect(dynamic).toContain('  2. beta hangs')
+    expect(dynamic).toContain('  3. gamma 404s')
+    expect(dynamic).toContain('ticket 1 uses scenario 1')
+  })
+
+  it('keeps scenarios out of the static prefix so prompt caching still hits', () => {
+    const withScenarios = compilePromptParts({ ...base, scenarios: ['alpha fails', 'beta hangs', 'gamma 404s'] })
+    const without = compilePromptParts(base)
+    expect(withScenarios.static).toBe(without.static)
+    expect(withScenarios.static).not.toContain('alpha fails')
+  })
+
+  it('omits the scenario block entirely when none are dealt', () => {
+    for (const scenarios of [undefined, []]) {
+      const { dynamic } = compilePromptParts({ ...base, scenarios })
+      expect(dynamic).not.toContain('scenario')
+      expect(dynamic).toContain('EXACTLY 3 unique ticket(s)')
+    }
+  })
+
+  it('tells the model to invent the rest when the reserve ran dry mid-batch', () => {
+    const { dynamic } = compilePromptParts({ ...base, scenarios: ['only one'] })
+    expect(dynamic).toContain('  1. only one')
+    expect(dynamic).toContain('The remaining 2 ticket(s) have no scenario')
+  })
+})
+
+describe('compileScenarioPrompt', () => {
+  it('appends the scenario instructions to the user prompt with an exact count', () => {
+    const out = compileScenarioPrompt('CREATIVE', 33)
+    expect(out).toContain('CREATIVE')
+    expect(out).toContain('EXACTLY 33 one-line ticket scenarios, numbered 1 to 33')
+    expect(out).toContain('{ "scenarios": ["...", "...", ...] }')
+    // The user's own examples are the thing we most need it to move past.
+    expect(out).toContain('Do not reuse them')
+  })
+
+  it('still emits the instructions when the editable prompt is empty', () => {
+    const out = compileScenarioPrompt('', 8)
+    expect(out.startsWith('═')).toBe(true)
+    expect(out).toContain('EXACTLY 8 one-line ticket scenarios')
+  })
+})
+
+describe('scenarioTarget', () => {
+  it('adds a flat buffer at small counts and 30% at large ones', () => {
+    expect(scenarioTarget(5)).toBe(8) // 5 + 3 beats ceil(6.5)
+    expect(scenarioTarget(10)).toBe(13) // tie: both give 13
+    expect(scenarioTarget(100)).toBe(130) // 30% beats +3
+    expect(scenarioTarget(25)).toBe(33)
+  })
+
+  it('always leaves at least three spare for top-up rounds', () => {
+    for (const n of [0, 1, 2, 3, 7, 20, 500]) {
+      expect(scenarioTarget(n) - n).toBeGreaterThanOrEqual(3)
+    }
   })
 })

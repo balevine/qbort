@@ -95,7 +95,7 @@ Persisted locally (non-sensitive) in `settings.json` under Electron `userData`. 
 
 | Setting | Control | Default | Min | Max | Notes |
 |---|---|---|---|---|---|
-| Number of tickets | slider + number | 100 | 1 | 5000 | Hard cap 5000. |
+| Number of tickets | slider + number | 100 | 1 | 500 | Hard cap 500, set by the single-call scenario pass (§6). |
 | Average number of staff responses | slider + number | 0 | 0 | 20 | Mean responses/ticket; actual count varies around this. |
 | Include staff responses? | toggle | false | — | — | When false, a ticket has only its opening message regardless of the average. |
 | Number of staff members | slider + number | 10 | 1 | 100 | Drives the number of rows in the staff roster editor (below). |
@@ -137,6 +137,7 @@ Other config that lives in **settings.json** (not the keychain):
       - output JSON schema + "return only JSON" instruction
       - staff roster (names/emails) — only if include staff responses
       - per-ticket response count guidance — only if include staff responses
+      - the one-line scenario dealt to each ticket in this batch (§6)
       - allowed status values
   ```
 
@@ -188,7 +189,8 @@ All provider calls happen **in the main process** (keeps keys out of the rendere
 ## 6. Generation orchestration (`orchestrator.ts`)
 
 Mirrors the Ruby batched-async approach:
-- **Batching**: split `requestedCount` into batches (configurable `batchSize`, default ~20). Up to 5000 tickets → up to ~250 batches. The batch size is **adaptively reduced** when staff responses make each ticket large, so a batch's expected output stays within the model's token budget and doesn't get truncated mid-JSON (which would drop the whole batch). `max_tokens` is sized per batch from the expected output — using the **actual per-ticket response counts sampled for that batch** (their sum captures the Poisson tail a flat average misses), not a fixed constant.
+- **Scenario pass (before any batch)**: batch prompts differ only in their count, so independent batches converge on the same high-probability topics and produce near-duplicate tickets across batches. The orchestrator opens every run with **one** call that returns a list of one-line ticket scenarios — `scenarioTarget(n) = max(n + 3, ceil(n × 1.3))` of them, more than the user's prompt has examples, which forces invention — then shuffles the list with the run's rng and deals **one scenario per ticket** into each batch's dynamic suffix (never the cached static prefix). The surplus is a reserve top-up rounds draw from. The call is retried up to 3 times on failure, unparseable output, or a list shorter than `requestedCount`, and then **fails the run**: there is deliberately no fallback to scenario-less batches, because shipping duplicate-heavy tickets at full cost gives the user no signal anything broke. If the reserve runs dry mid-top-up the remaining tickets are generated unscripted rather than failing, since most of the run's output already exists by then. **This is what caps `numTickets` at 500** (§3): the list must arrive in one response, and past roughly 530 one-liners it exceeds `MAX_OUTPUT_TOKENS_CEILING` and truncates. Lifting the cap means splitting the scenario call into several requests, each shown what the earlier ones produced.
+- **Batching**: split `requestedCount` into batches (configurable `batchSize`, default ~20). Up to 500 tickets → up to ~25 batches. The batch size is **adaptively reduced** when staff responses make each ticket large, so a batch's expected output stays within the model's token budget and doesn't get truncated mid-JSON (which would drop the whole batch). `max_tokens` is sized per batch from the expected output — using the **actual per-ticket response counts sampled for that batch** (their sum captures the Poisson tail a flat average misses), not a fixed constant.
 - **Top-up rounds**: validation drops malformed tickets (and a hard batch failure keeps none), so a pass can end below `requestedCount`. The orchestrator re-counts the kept tickets and, if short, generates **exactly the shortfall** in a fresh set of batches — validating only those new tickets — repeating for up to `MAX_TOPUP_ROUNDS` (3) additional rounds or until the count is met. Each round requests only the shortfall and every batch is still capped to its own count, so the kept total never exceeds `requestedCount` and ids stay within the pre-computed opening-time window. A persistently failing/all-invalid model simply exhausts the 3 rounds and returns fewer than requested rather than looping forever.
 - **Truncation handling**: providers detect a cut-off response (Anthropic `stop_reason: "max_tokens"`, Ollama `done_reason: "length"`) and raise a distinct, retryable **truncation error** instead of letting the truncated JSON fail a parse and drop the batch. The orchestrator responds by **growing `max_tokens`** on retry and, once at the ceiling, **splitting the batch in half** (recursively) so the smaller batches produce less output and fit — preserving the ticket count instead of dropping it.
 - **Concurrency**: limited parallelism (e.g. `p-limit`, 3–5 concurrent) to respect rate limits.
@@ -196,7 +198,7 @@ Mirrors the Ruby batched-async approach:
 - **Progress**: main streams progress events to renderer via `webContents.send` (`generation:progress`): batches done, tickets done, retries, errors, ETA.
 - **Cancellation**: `AbortController`; a Cancel button aborts in-flight requests and stops scheduling new batches; tickets produced so far are still written.
 - **ID assignment & validation**: after each batch, tickets are validated (zod), repaired or dropped, assigned sequential ids, and appended to the output.
-- **Pre-run cost estimate (required gate)**: before every run, show an estimated token/cost breakdown — derived from `requestedCount`, batch size, an assumed avg input/output tokens per ticket (calibrated from a small sample or heuristic), and the provider `pricing` table — and require explicit confirmation to proceed. Ollama runs show "$0 (local)".
+- **Pre-run cost estimate (required gate)**: before every run, show an estimated token/cost breakdown — derived from `requestedCount`, batch size, an assumed avg input/output tokens per ticket (calibrated from a small sample or heuristic), the up-front scenario call and the scenario lines each batch prompt carries, and the provider `pricing` table — and require explicit confirmation to proceed. Ollama runs show "$0 (local)".
 - **Usage tracking (completed runs)**: accumulate real input/output token counts reported by each provider's API response across all batches; compute `actualCostUsd` from the pricing table; record `inputTokens`, `outputTokens`, `totalTokens`, `batches`, `estimatedCostUsd`, `actualCostUsd`, `pricing`, and `durationMs` into `meta.usage` (§2). The viewer surfaces this breakdown for any loaded file.
 
 Output is written incrementally/atomically so a crash mid-run still leaves a valid file (write to temp file, then rename).
@@ -213,7 +215,7 @@ Output is written incrementally/atomically so a crash mid-run still leaves a val
 - On launch, if a ticket file exists in the default directory (last-used preferred), load it into the view automatically.
 
 ### Viewer (renderer)
-- **Paginated list**: a single scrollable list/table of tickets, **100 per page**, with page controls (first/prev/next/last + page indicator). Columns `id` (shown as `#N`), `subject`, `status`, the customer (`messages[0]`'s author), and the ticket's created time (`messages[0]`'s `createdAt`). Pagination (not virtualization) keeps the DOM light for 5000-ticket files.
+- **Paginated list**: a single scrollable list/table of tickets, **100 per page**, with page controls (first/prev/next/last + page indicator). Columns `id` (shown as `#N`), `subject`, `status`, the customer (`messages[0]`'s author), and the ticket's created time (`messages[0]`'s `createdAt`). Pagination (not virtualization) keeps the DOM light for large files (including ones generated before the 500-ticket cap, or by other tools).
 - **Detail (conversation modal)**: each ticket row is clickable and **pops the full conversation into a modal** over the page. The thread renders `messages[]` in order — author name/email and `createdAt` shown per message. Messages are highlighted by role to separate the two sides:
   - **Customer messages** (`isStaff: false`): black text on a **white** background.
   - **Staff messages** (`isStaff: true`): black text on a **slate-grey** background.
@@ -348,7 +350,7 @@ Decided:
 Goal: a small, fast, **deterministic** suite that locks in core behavior so new features don't silently regress it. No real network calls — providers are mocked. Runner: **Vitest**.
 
 ### Unit tests (pure logic)
-- `promptCompiler` — editable prompt + injected requirements compose correctly; staff roster and response guidance only appear when enabled; allowed-status list is included.
+- `promptCompiler` — editable prompt + injected requirements compose correctly; staff roster and response guidance only appear when enabled; allowed-status list is included; dealt scenarios appear in the dynamic suffix only (never the cached prefix) and the scenario-list prompt asks for an exact count.
 - `validate` (zod) — valid tickets pass; malformed ones are repaired (id assigned, bad status → `open`) or dropped; `responses` stripped when staff responses are disabled; the **opening message is forced to customer role** even on a `@company.biz` email; recently-opened tickets drop their replies on assembly.
 - `time` — opening times ascending within the window and never in the future; message timestamps **strictly increasing** even in a tiny window before "now"; `isRecentOpening` boundary.
 - `staff` — roster resize (grow/trim), alias normalization/uniqueness, derived `@company.biz` emails, default roster, auto-generate-when-empty, and the response-count distribution.
@@ -357,7 +359,7 @@ Goal: a small, fast, **deterministic** suite that locks in core behavior so new 
 - `fsUtil` — atomic write/read round-trip, null on missing/malformed, unique temp names under concurrent writes.
 
 ### Integration tests (cross-module flows — the regression guard)
-1. **Generation orchestration with a mock provider** — inject a fake `LLMProvider` returning canned JSON; run a multi-batch generation and assert: correct ticket count, sequential ids, role assignment (`@company.biz` ⇒ staff), batching/concurrency, retry/backoff on a simulated `429`, **truncation → grow `max_tokens` → split-batch recovery**, **over-delivery capped to the requested count**, partial-success on a failing batch, cancellation via `AbortController`, and accumulated `meta.usage` (tokens, cost, batches, duration). The `GenerationService` layer is covered separately (injected clock, one-run-at-a-time guard, coalesced/atomic writes, `meta` assembly).
+1. **Generation orchestration with a mock provider** — inject a fake `LLMProvider` returning canned JSON; run a multi-batch generation and assert: correct ticket count, sequential ids, role assignment (`@company.biz` ⇒ staff), batching/concurrency, retry/backoff on a simulated `429`, **truncation → grow `max_tokens` → split-batch recovery**, **over-delivery capped to the requested count**, partial-success on a failing batch, cancellation via `AbortController`, and accumulated `meta.usage` (tokens, cost, batches, duration). The scenario pass is covered alongside: one call per run, a distinct scenario dealt to every ticket, top-ups drawing from the reserve (and coping when it runs dry), retry on an unusable list, and the run failing outright rather than generating without scenarios. The `GenerationService` layer is covered separately (injected clock, one-run-at-a-time guard, coalesced/atomic writes, `meta` assembly).
 2. **Storage round-trip** — write tickets to the default directory, read them back, export to a chosen path; assert the on-disk JSON matches the schema and atomic-write (temp + rename) leaves a valid file if interrupted.
 3. **Settings + secrets** — persist/restore `settings.json` (incl. roster + default directory); `safeStorage` key set/has/clear round-trips with `safeStorage` faked; assert keys are never returned to the renderer (only a boolean "is set").
 4. **End-to-end generate→load** — drive a generation through the mock provider, then load the produced file through the viewer's load path; assert tickets, pagination grouping (100/page), and the parsed conversation/role split feed the modal correctly.

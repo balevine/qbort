@@ -1,6 +1,6 @@
 ---
 name: generate-tickets
-description: Generate fake customer-support tickets with an LLM, driven by a TICKET_PROMPT.md file plus a short settings Q&A. Fans generation out to parallel subagents; a deterministic engine owns batching, validation/repair, id assignment, timestamp synthesis, and top-up rounds, writing a tickets.json. Use when the user wants to generate synthetic support tickets / a tickets dataset.
+description: Generate fake customer-support tickets with an LLM, driven by a TICKET_PROMPT.md file plus a short settings Q&A. Deals a distinct scenario to every ticket, then fans generation out to parallel subagents; a deterministic engine owns batching, validation/repair, id assignment, timestamp synthesis, and top-up rounds, writing a tickets.json. Use when the user wants to generate synthetic support tickets / a tickets dataset.
 ---
 
 # generate-tickets
@@ -31,7 +31,7 @@ Use the `AskUserQuestion` tool. All answers are re-clamped by the engine, so cus
 are safe. Ask these, offering presets plus custom entry:
 
 Round 1 (one `AskUserQuestion` call, up to 4 questions):
-- **Number of tickets** — presets 25 / 100 / 500 (1–5000).
+- **Number of tickets** — presets 25 / 100 / 500 (1–500).
 - **Include staff responses?** — Yes / No.
 - **Number of staff members** — presets 5 / 10 / 25 (1–100). The roster is auto-generated at this
   size (`Firstname Lastname` + `firstname.lastname@company.biz`); custom names aren't collected here.
@@ -44,6 +44,11 @@ Keep counts modest by default. Content for every ticket round-trips back through
 subagents finish, so runs above a few hundred tickets get expensive — steer large asks toward a
 smaller first run unless the user insists.
 
+500 is a hard cap (the engine clamps to it). The scenario list in Step 4 is written by one subagent
+in one response, and much beyond that it stops being reliable. If the user wants more than 500,
+tell them to do several runs — each gets its own independent scenario list — rather than asking for
+a bigger number.
+
 ## Step 3 — plan the run
 
 ```
@@ -52,9 +57,36 @@ node "$ENGINE" plan --prompt TICKET_PROMPT.md --out .qbort-run \
 ```
 
 Pass `--staff` only when staff responses are enabled (add `--avg <A>` with it). The command prints a
-`ROUND 0` block listing one batch per line, each with an absolute `PROMPT=` file and `BATCH=` file.
+`SCENARIO` block naming one `PROMPT=` file and one `OUT=` file for Step 4.
 
-## Step 4 — fan out subagents (one per batch)
+## Step 4 — generate the scenario list (one subagent)
+
+Batch prompts are otherwise byte-identical, so independent batches converge on the same handful of
+topics and produce near-duplicate tickets. The fix is to generate one list of one-line scenarios up
+front and deal one per ticket. Spawn **exactly one** subagent (same `ticket-batch` type as Step 5),
+with this task, substituting the `PROMPT=` and `OUT=` paths from the `SCENARIO` block:
+
+> Read the file `<PROMPT path>`. It contains complete instructions and the exact JSON output shape
+> to produce. Follow it precisely. Write ONLY the resulting JSON object (no markdown fences, no
+> commentary) to `<OUT path>`, overwriting it. Then reply with just `done`. Do not read or write any
+> other files, and do not run any commands — in particular, do not verify, parse, re-read, or count
+> what you wrote.
+
+Then build the batch prompts:
+
+```
+node "$ENGINE" batches --out .qbort-run
+```
+
+This validates and shuffles the list and prints a `ROUND 0` block listing one batch per line, each
+with an absolute `PROMPT=` file and `BATCH=` file.
+
+If `batches` exits non-zero (`NO_SCENARIOS`, `BAD_SCENARIOS`, or `SHORT_SCENARIOS`), retry the
+scenario subagent **once**, then re-run `batches`. If it fails again, **stop and report** — do not
+fan out without scenarios. A full-cost run of duplicate-heavy tickets is worse than no output,
+because the user gets no signal that anything went wrong.
+
+## Step 5 — fan out subagents (one per batch)
 
 Spawn **all** of a round's batches as subagents **in a single message** (parallel), using the
 `Agent` tool.
@@ -74,9 +106,9 @@ Give each subagent exactly this task, substituting its own PROMPT and BATCH path
 > later step, so checking your own output is wasted work.
 
 If a subagent fails or writes nothing, don't worry — the engine treats a missing/garbled batch file
-as zero tickets and the top-up loop (Step 6) makes up the shortfall.
+as zero tickets and the top-up loop (Step 7) makes up the shortfall.
 
-## Step 5 — assemble
+## Step 6 — assemble
 
 ```
 node "$ENGINE" assemble --out .qbort-run --round 0
@@ -86,20 +118,24 @@ This validates/repairs each batch, assigns ids + roles + timestamps, caps to the
 appends to the accumulator, and (re)writes `.qbort-run/tickets.json`. It prints a
 `KEPT … REQUESTED … DROPPED … SHORTFALL …` line and the final `FILE` path.
 
-## Step 6 — top-up rounds (if short)
+## Step 7 — top-up rounds (if short)
 
 If `SHORTFALL > 0`, run up to **3** additional rounds (round 1, 2, 3). For each round `R`:
 
 ```
 node "$ENGINE" topup --out .qbort-run --round R      # prints a ROUND R batch block
-# → spawn that round's subagents in parallel (Step 4)
+# → spawn that round's subagents in parallel (Step 5)
 node "$ENGINE" assemble --out .qbort-run --round R   # prints the updated SHORTFALL
 ```
+
+Top-ups draw scenarios from the reserve the scenario list was over-generated with (Step 4 asks for
+~30% more than requested). No extra scenario call is needed. If the reserve runs dry, `topup` says so
+and those tickets are generated without a scenario — that's expected, not an error.
 
 Stop when `SHORTFALL` reaches 0 or after round 3 (a persistently failing model just returns fewer
 than requested — that's expected, not an error).
 
-## Step 7 — report
+## Step 8 — report
 
 Tell the user the final `tickets.json` path, the kept vs. requested count, and how many rounds ran.
 Offer to preview a few tickets (read and summarize the file) or to copy it somewhere. Do not print

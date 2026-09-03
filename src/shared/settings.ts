@@ -1,9 +1,16 @@
 import type { GenerationSettings, OllamaConfig, Settings } from './types'
 import { DEFAULT_STAFF_ROSTER, normalizeRoster } from './staff'
 
-/** Bounds for the numeric settings (shared by the UI sliders and validation). */
+/**
+ * Bounds for the numeric settings (shared by the UI sliders and validation).
+ *
+ * `numTickets` is capped at 500 by the scenario pass (§6 of the spec): the run's whole scenario
+ * list comes back from one call, and past roughly 530 one-liners it exceeds
+ * `MAX_OUTPUT_TOKENS_CEILING` and truncates. Raising this cap means splitting that call across
+ * several requests first.
+ */
 export const LIMITS = {
-  numTickets: { min: 1, max: 5000, default: 100 },
+  numTickets: { min: 1, max: 500, default: 100 },
   avgStaffResponses: { min: 0, max: 20, default: 0 },
   numStaffMembers: { min: 1, max: 100, default: 10 },
   maxTicketAgeDays: { min: 1, max: 3650, default: 90 }

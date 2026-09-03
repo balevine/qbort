@@ -26,6 +26,13 @@ describe('estimateRun', () => {
     expect(est.estimatedTotalTokens).toBe(est.estimatedInputTokens + est.estimatedOutputTokens)
   })
 
+  it('prices in the up-front scenario call, which is not one of the batches', () => {
+    const est = estimateRun(settings('anthropic', { numTickets: 100, includeStaffResponses: false }), 20)
+    // 100 tickets × 180 output tokens each, plus scenarioTarget(100) = 130 one-liners.
+    expect(est.estimatedOutputTokens).toBe(100 * 180 + 130 * 60)
+    expect(est.batches).toBe(5) // the scenario call doesn't inflate the batch count
+  })
+
   it('estimates more output tokens when staff responses are enabled', () => {
     const base = estimateRun(settings('anthropic', { numTickets: 100, includeStaffResponses: false }))
     const withStaff = estimateRun(
