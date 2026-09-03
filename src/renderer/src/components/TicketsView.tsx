@@ -16,7 +16,7 @@ import { useTickets } from '@/state/TicketsContext'
 import { useToast } from '@/state/ToastContext'
 import { PAGE_SIZE, filterTickets, pageCount, pageOf, type StatusFilter } from '@/lib/tickets'
 import { errorMessage, formatCost, formatDuration, formatInt, formatTicketId, formatTimestamp } from '@/lib/format'
-import { PROVIDER_LABELS, TICKET_STATUSES } from '@shared/types'
+import { ticketFileProviderLabel, TICKET_STATUSES } from '@shared/types'
 
 export function TicketsView() {
   const { file, filePath } = useTickets()
@@ -76,17 +76,20 @@ export function TicketsView() {
             {formatInt(tickets.length)} tickets
           </h1>
           <span className="font-mono text-xs uppercase tracking-widest text-ink/50">
-            {PROVIDER_LABELS[meta.provider]} · {meta.model}
+            {ticketFileProviderLabel(meta.provider)} · {meta.model}
           </span>
         </div>
+        {/* Token/cost stats only exist for accounted runs; skill-generated files show "—". */}
         <div className="mt-3 grid grid-cols-2 gap-2 font-mono text-xs sm:grid-cols-4">
-          <Stat label="Tokens" value={formatInt(meta.usage.totalTokens)} />
+          <Stat label="Tokens" value={meta.usage ? formatInt(meta.usage.totalTokens) : '—'} />
           <Stat
             label="Cost"
-            value={formatCost(meta.usage.actualCostUsd, { isLocal: meta.provider === 'ollama' })}
+            value={
+              meta.usage ? formatCost(meta.usage.actualCostUsd, { isLocal: meta.provider === 'ollama' }) : '—'
+            }
           />
-          <Stat label="Batches" value={formatInt(meta.usage.batches)} />
-          <Stat label="Duration" value={formatDuration(meta.usage.durationMs)} />
+          <Stat label="Batches" value={meta.usage ? formatInt(meta.usage.batches) : '—'} />
+          <Stat label="Duration" value={meta.usage ? formatDuration(meta.usage.durationMs) : '—'} />
         </div>
         {statusCounts.length > 0 ? (
           <div className="mt-2 flex flex-wrap gap-1.5 font-mono text-[10px] uppercase tracking-widest">
