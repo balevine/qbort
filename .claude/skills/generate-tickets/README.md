@@ -14,6 +14,8 @@ This is a developer/Claude-Code tool, not the desktop app. If you want a GUI wit
 - **Project-scoped** (this repo): it already lives at `.claude/skills/generate-tickets/`.
 - **Global** (any project on your machine): copy the whole folder to `~/.claude/skills/generate-tickets/`.
 
+Optionally also copy `.claude/agents/ticket-batch.md` alongside it (to `~/.claude/agents/` for a global install). That's the restricted `Read`/`Write`-only agent the skill prefers for batch generation, which keeps batch subagents from shelling out to verify their own output. It's not required — without it the skill falls back to the general-purpose agent and instructs it not to self-verify.
+
 ## Usage
 
 1. `cd` into the directory where you want the output (the skill reads/writes there).

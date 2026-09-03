@@ -56,14 +56,22 @@ Pass `--staff` only when staff responses are enabled (add `--avg <A>` with it). 
 
 ## Step 4 — fan out subagents (one per batch)
 
-Spawn **all** of a round's batches as subagents **in a single message** (parallel). Use the `Agent`
-tool with `subagent_type: general-purpose`. Give each subagent exactly this task, substituting its
-own PROMPT and BATCH paths:
+Spawn **all** of a round's batches as subagents **in a single message** (parallel), using the
+`Agent` tool.
+
+Prefer `subagent_type: ticket-batch` — a restricted agent (`Read`/`Write` only) that ships alongside
+this skill at `.claude/agents/ticket-batch.md`. If that agent type isn't registered (the skill folder
+was copied without `.claude/agents/`), fall back to `subagent_type: general-purpose`. The task text
+below stands on its own either way.
+
+Give each subagent exactly this task, substituting its own PROMPT and BATCH paths:
 
 > Read the file `<PROMPT path>`. It contains complete instructions and the exact JSON output shape
 > to produce. Follow it precisely and generate the tickets. Write ONLY the resulting JSON object
 > (no markdown fences, no commentary) to `<BATCH path>`, overwriting it. Then reply with just
-> `done`. Do not read or write any other files.
+> `done`. Do not read or write any other files, and do not run any commands — in particular, do not
+> verify, parse, re-read, or count what you wrote. The engine validates and repairs every batch in a
+> later step, so checking your own output is wasted work.
 
 If a subagent fails or writes nothing, don't worry — the engine treats a missing/garbled batch file
 as zero tickets and the top-up loop (Step 6) makes up the shortfall.
@@ -104,5 +112,4 @@ the whole file.
   never trusted with these — don't post-edit them.
 - Everything is deterministic given the run's seed (printed by `plan`); pass `--seed <n>` to `plan`
   to reproduce a run.
-- `.qbort-run/` is scratch. Suggest the user add it to `.gitignore` if they don't want it tracked.
 - Requires Node (`node --version`). No npm install — the engine is dependency-free ESM.
