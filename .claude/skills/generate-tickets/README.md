@@ -46,7 +46,7 @@ skill (SKILL.md drives Claude):
   └─ top-up rounds while short          (engine.mjs topup + assemble, up to 3 extra rounds)
 ```
 
-The engine owns the deterministic/error-handling spine (validation and repair, over-delivery capping, sequential ids, timestamp synthesis, top-up accounting); the subagents only produce content. A failed or garbled batch is treated as empty and the top-up loop makes up the shortfall. Runs are deterministic given the seed printed by `plan` (pass `--seed <n>` to reproduce one).
+The engine owns the deterministic/error-handling spine (validation and repair, over-delivery capping, sequential ids, timestamp synthesis, top-up accounting); the subagents only produce content. A failed or garbled batch is treated as empty and the top-up loop makes up the shortfall. Runs are not reproducible and don't try to be: ticket content and the scenario list both come from the model, so a seeded engine could only ever reproduce the scaffolding around tickets that themselves differ every time. The engine's own random choices (opening times, per-ticket reply targets, scenario deal order) use `Math.random`.
 
 The scenario pass exists because batch prompts are otherwise byte-identical, so independent batches converge on the same handful of topics. One call sees the whole list while writing it (so it self-diversifies) and is asked for ~30% more scenarios than there are tickets (so it has to invent past the examples in `TICKET_PROMPT.md`). The surplus is the reserve top-up rounds draw from. If the scenario call fails or returns fewer scenarios than there are tickets, `batches` exits non-zero and the run stops rather than silently producing duplicate-heavy output at full cost.
 
@@ -57,7 +57,7 @@ Most of the pure logic in `lib/` is ported from the app's `src/shared` and `src/
 ```
 SKILL.md                 instructions Claude follows (not human docs)
 engine.mjs               CLI: plan | batches | topup | assemble
-lib/                     ported pure logic (constants, settings, staff, time, promptCompiler, validate, rng)
+lib/                     ported pure logic (constants, settings, staff, time, promptCompiler, validate)
 templates/TICKET_PROMPT.md   starter prompt, scaffolded when you have none
 ```
 

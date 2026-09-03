@@ -6,7 +6,7 @@
 //
 // Subcommands:
 //   plan     --prompt <file> --out <dir> --count N [--staff] [--avg A] [--staff-members M]
-//            [--age-days D] [--batch-size B] [--seed S]
+//            [--age-days D] [--batch-size B]
 //   batches  --out <dir>
 //   topup    --out <dir> --round R
 //   assemble --out <dir> --round R
@@ -29,7 +29,6 @@ import { generateRoster, sampleResponseCounts } from './lib/staff.mjs'
 import { openingTimesForRun } from './lib/time.mjs'
 import { compilePromptParts, compileScenarioPrompt, scenarioTarget } from './lib/promptCompiler.mjs'
 import { validateTickets, assembleTickets } from './lib/validate.mjs'
-import { rngFor } from './lib/rng.mjs'
 import { DEFAULT_BATCH_SIZE } from './lib/constants.mjs'
 
 // ── tiny arg parser ───────────────────────────────────────────────────────────
@@ -70,8 +69,8 @@ function splitBatches(count, batchSize) {
   return specs
 }
 
-// Fisher-Yates over a copy, driven by the caller's seeded rng.
-function shuffled(list, rng) {
+// Fisher-Yates over a copy.
+function shuffled(list, rng = Math.random) {
   const out = list.slice()
   for (let i = out.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1))
@@ -89,7 +88,7 @@ function buildRound(ctx, outDir, round, count) {
   const specs = splitBatches(count, ctx.batchSize)
   const batches = specs.map((batchCount, index) => {
     const responseCounts = gen.includeStaffResponses
-      ? sampleResponseCounts(batchCount, gen.avgStaffResponses, rngFor(ctx.seed, 'resp', round, index))
+      ? sampleResponseCounts(batchCount, gen.avgStaffResponses)
       : undefined
     const scenarios = (ctx.scenarios ?? []).slice(ctx.scenarioCursor, ctx.scenarioCursor + batchCount)
     ctx.scenarioCursor += scenarios.length
@@ -142,12 +141,11 @@ function cmdPlan(args) {
     maxTicketAgeDays: args['age-days'] !== undefined ? Number(args['age-days']) : undefined
   })
 
-  const seed = args.seed !== undefined ? Number(args.seed) >>> 0 : (Date.now() >>> 0)
   const nowMs = Date.now()
   const batchSize = args['batch-size'] !== undefined ? Math.max(1, Number(args['batch-size'])) : DEFAULT_BATCH_SIZE
 
   const roster = generateRoster(settings.numStaffMembers)
-  const openingTimes = openingTimesForRun(settings.numTickets, settings.maxTicketAgeDays, nowMs, rngFor(seed, 'opening'))
+  const openingTimes = openingTimesForRun(settings.numTickets, settings.maxTicketAgeDays, nowMs)
 
   // Static prefix is identical across every batch. Pass a defined (empty) responseCounts so the
   // averaged directive is omitted here (per-ticket targets live in each batch's dynamic suffix).
@@ -164,7 +162,6 @@ function cmdPlan(args) {
 
   const ctx = {
     version: 1,
-    seed,
     nowMs,
     batchSize,
     prompt,
@@ -186,7 +183,7 @@ function cmdPlan(args) {
   const scenariosFile = resolve(join(outDir, 'scenarios.json'))
   writeFileSync(scenarioPromptFile, `${compileScenarioPrompt(prompt, ctx.scenarioCount)}\n`)
 
-  console.log(`PLANNED ${settings.numTickets} ticket(s), batchSize=${batchSize}, staff=${settings.includeStaffResponses}, roster=${roster.length}, seed=${seed}`)
+  console.log(`PLANNED ${settings.numTickets} ticket(s), batchSize=${batchSize}, staff=${settings.includeStaffResponses}, roster=${roster.length}`)
   console.log(`OUT ${outDir}`)
   console.log(`SCENARIO ${ctx.scenarioCount} scenario(s) needed. Spawn ONE subagent that reads its PROMPT file and writes its OUT file:`)
   console.log(`  PROMPT=${scenarioPromptFile} OUT=${scenariosFile}`)
@@ -194,7 +191,7 @@ function cmdPlan(args) {
 }
 
 // ── batches ─────────────────────────────────────────────────────────────────
-// Reads the scenario list the subagent produced, shuffles it with the run seed, and builds round 0.
+// Reads the scenario list the subagent produced, shuffles it, and builds round 0.
 // Shuffling matters: the model emits the list grouped by whatever categories the prompt implies, so
 // dealing it in order would cluster categories per batch and leave the reserve as one category.
 function cmdBatches(args) {
@@ -240,7 +237,7 @@ function cmdBatches(args) {
     process.exit(2)
   }
 
-  ctx.scenarios = shuffled(cleaned, rngFor(ctx.seed, 'scenarios'))
+  ctx.scenarios = shuffled(cleaned)
   ctx.scenarioCursor = 0
   const manifest = buildRound(ctx, outDir, 0, needed)
   writeJson(join(outDir, 'run-context.json'), ctx)
@@ -296,10 +293,9 @@ function cmdAssemble(args) {
   const total = ctx.settings.numTickets
   const includeStaffResponses = ctx.settings.includeStaffResponses
   const kept = ctx.tickets
-  const assembleRng = rngFor(ctx.seed, 'assemble', round)
   const timeCtx = {
     nowMs: ctx.nowMs,
-    rng: assembleRng,
+    rng: Math.random,
     openingMsForId: (id) => ctx.openingTimes[id - 1] ?? ctx.nowMs
   }
 
