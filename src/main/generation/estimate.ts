@@ -1,6 +1,11 @@
 import type { CostEstimate, Settings } from '@shared/types'
-import { DEFAULT_BATCH_SIZE, effectiveBatchSize, estimatedTokensPerTicket } from '@shared/generation'
-import { compilePrompt } from '@shared/promptCompiler'
+import {
+  DEFAULT_BATCH_SIZE,
+  OUTPUT_TOKENS_PER_SCENARIO,
+  effectiveBatchSize,
+  estimatedTokensPerTicket
+} from '@shared/generation'
+import { compilePrompt, compileScenarioPrompt, scenarioTarget } from '@shared/promptCompiler'
 import { ensureRoster } from '@shared/staff'
 import { costForUsage } from './providers/models'
 import { modelForSettings } from './providers'
@@ -32,11 +37,24 @@ export function estimateRun(settings: Settings, batchSize = DEFAULT_BATCH_SIZE):
     }
   })
 
-  const inputTokensPerBatch = Math.ceil(samplePrompt.length / CHARS_PER_TOKEN) + SYSTEM_TOKENS
-  const estimatedInputTokens = inputTokensPerBatch * batches
+  // Each batch prompt also carries the scenarios dealt to its tickets (one line each), which the
+  // sample above doesn't include.
+  const inputTokensPerBatch =
+    Math.ceil(samplePrompt.length / CHARS_PER_TOKEN) +
+    SYSTEM_TOKENS +
+    sampleBatchCount * OUTPUT_TOKENS_PER_SCENARIO
+
+  // Every run opens with one scenario call (see the orchestrator): the user's prompt plus a short
+  // instruction block in, one line per scenario out.
+  const scenarioCount = scenarioTarget(total)
+  const scenarioPrompt = compileScenarioPrompt(settings.prompt, scenarioCount)
+  const scenarioInputTokens = Math.ceil(scenarioPrompt.length / CHARS_PER_TOKEN) + SYSTEM_TOKENS
+  const scenarioOutputTokens = scenarioCount * OUTPUT_TOKENS_PER_SCENARIO
+
+  const estimatedInputTokens = inputTokensPerBatch * batches + scenarioInputTokens
 
   const perTicketOutput = estimatedTokensPerTicket(gen.includeStaffResponses, gen.avgStaffResponses)
-  const estimatedOutputTokens = Math.ceil(total * perTicketOutput)
+  const estimatedOutputTokens = Math.ceil(total * perTicketOutput) + scenarioOutputTokens
 
   const provider = settings.providerId
   const estimatedCostUsd = costForUsage(provider, {

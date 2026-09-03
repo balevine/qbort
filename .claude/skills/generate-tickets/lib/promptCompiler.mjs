@@ -94,10 +94,59 @@ function dynamicSuffix(input) {
       `  [${input.staff.responseCounts.join(', ')}]`
     )
   }
+  // Scenarios are dealt by the engine so that independent batches cannot converge on the same
+  // high-probability topics. They live in the dynamic suffix on purpose (the static prefix is
+  // prompt-cached in the desktop app, and both ports must stay aligned).
+  const scenarios = input.scenarios ?? []
+  if (scenarios.length > 0) {
+    lines.push(
+      'Ticket scenarios, in order — ticket 1 uses scenario 1, ticket 2 uses scenario 2, and so on:',
+      ...scenarios.map((s, i) => `  ${i + 1}. ${s}`),
+      'Expand each scenario into a full ticket in its own voice. Do not copy its wording, and do not',
+      'write about anything else.'
+    )
+    if (scenarios.length < input.batchCount) {
+      lines.push(
+        `The remaining ${input.batchCount - scenarios.length} ticket(s) have no scenario — invent them,`,
+        'keeping them clearly distinct from the ones above.'
+      )
+    }
+  }
   return lines.join('\n')
 }
 
 /** Compose the prompt as a static prefix (identical across batches) plus a per-batch suffix. */
 export function compilePromptParts(input) {
   return { static: staticPrefix(input), dynamic: dynamicSuffix(input) }
+}
+
+/**
+ * How many scenarios to ask for when generating `count` tickets. The surplus is the reserve that
+ * top-up rounds draw from, so a re-generated ticket gets a fresh scenario rather than a repeat.
+ */
+export function scenarioTarget(count) {
+  return Math.max(count + 3, Math.ceil(count * 1.3))
+}
+
+/**
+ * The one-shot call that produces the whole scenario list. Asking for more one-liners than the
+ * user's prompt has examples forces invention, and generating them in a single call lets the model
+ * see the whole list while writing it — the same thing that keeps within-batch tickets distinct.
+ */
+export function compileScenarioPrompt(editablePrompt, count) {
+  const editable = (editablePrompt ?? '').trim()
+  const requirements = [
+    DELIMITER,
+    'OUTPUT REQUIREMENTS (enforced by the app — follow exactly)',
+    DELIMITER,
+    `Produce EXACTLY ${count} one-line ticket scenarios, numbered 1 to ${count}.`,
+    'Follow the category mix described above (if one is described).',
+    'Any examples above are illustrative and are already covered. Do not reuse them.',
+    'Make each scenario distinct in what it is about AND in who is writing it.',
+    'Return ONLY a JSON object — no prose, no markdown fences — of this shape:',
+    '',
+    '{ "scenarios": ["...", "...", ...] }',
+    DELIMITER
+  ].join('\n')
+  return editable ? `${editable}\n\n${requirements}` : requirements
 }

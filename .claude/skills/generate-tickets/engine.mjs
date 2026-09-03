@@ -6,9 +6,16 @@
 //
 // Subcommands:
 //   plan     --prompt <file> --out <dir> --count N [--staff] [--avg A] [--staff-members M]
-//            [--age-days D] [--batch-size B] [--seed S]
+//            [--age-days D] [--batch-size B]
+//   batches  --out <dir>
 //   topup    --out <dir> --round R
 //   assemble --out <dir> --round R
+//
+// `plan` and `batches` are separate because a scenario list has to be generated in between, and in
+// the skill an LLM call is a subagent spawn that only SKILL.md can make. `plan` writes
+// <out>/scenario-prompt.txt, a subagent answers into <out>/scenarios.json, and `batches` deals one
+// scenario per ticket into the batch prompts so independent batches cannot converge on the same
+// topics.
 //
 // State lives in <out>/run-context.json; each round's batch manifest in <out>/round-<r>.json;
 // each batch's compiled prompt in <out>/prompt-<r>-<i>.txt and the subagent's raw output in
@@ -20,9 +27,8 @@ import { join, resolve } from 'node:path'
 import { clampGeneration, DEFAULT_PROMPT } from './lib/settings.mjs'
 import { generateRoster, sampleResponseCounts } from './lib/staff.mjs'
 import { openingTimesForRun } from './lib/time.mjs'
-import { compilePromptParts } from './lib/promptCompiler.mjs'
+import { compilePromptParts, compileScenarioPrompt, scenarioTarget } from './lib/promptCompiler.mjs'
 import { validateTickets, assembleTickets } from './lib/validate.mjs'
-import { rngFor } from './lib/rng.mjs'
 import { DEFAULT_BATCH_SIZE } from './lib/constants.mjs'
 
 // ── tiny arg parser ───────────────────────────────────────────────────────────
@@ -63,17 +69,33 @@ function splitBatches(count, batchSize) {
   return specs
 }
 
-// Compile prompt files for a round and write its manifest. Shared by `plan` and `topup`.
+// Fisher-Yates over a copy.
+function shuffled(list, rng = Math.random) {
+  const out = list.slice()
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    ;[out[i], out[j]] = [out[j], out[i]]
+  }
+  return out
+}
+
+// Compile prompt files for a round and write its manifest. Shared by `batches` and `topup`.
+// Deals scenarios off the context's list, advancing `scenarioCursor` as batches are built. A round
+// that outruns the reserve simply gets fewer scenarios than tickets — see cmdTopup.
 function buildRound(ctx, outDir, round, count) {
   const gen = ctx.settings
+  if (typeof ctx.scenarioCursor !== 'number') ctx.scenarioCursor = 0
   const specs = splitBatches(count, ctx.batchSize)
   const batches = specs.map((batchCount, index) => {
     const responseCounts = gen.includeStaffResponses
-      ? sampleResponseCounts(batchCount, gen.avgStaffResponses, rngFor(ctx.seed, 'resp', round, index))
+      ? sampleResponseCounts(batchCount, gen.avgStaffResponses)
       : undefined
+    const scenarios = (ctx.scenarios ?? []).slice(ctx.scenarioCursor, ctx.scenarioCursor + batchCount)
+    ctx.scenarioCursor += scenarios.length
     const { dynamic } = compilePromptParts({
       editablePrompt: ctx.prompt,
       batchCount,
+      scenarios,
       staff: {
         include: gen.includeStaffResponses,
         avgResponses: gen.avgStaffResponses,
@@ -119,12 +141,11 @@ function cmdPlan(args) {
     maxTicketAgeDays: args['age-days'] !== undefined ? Number(args['age-days']) : undefined
   })
 
-  const seed = args.seed !== undefined ? Number(args.seed) >>> 0 : (Date.now() >>> 0)
   const nowMs = Date.now()
   const batchSize = args['batch-size'] !== undefined ? Math.max(1, Number(args['batch-size'])) : DEFAULT_BATCH_SIZE
 
   const roster = generateRoster(settings.numStaffMembers)
-  const openingTimes = openingTimesForRun(settings.numTickets, settings.maxTicketAgeDays, nowMs, rngFor(seed, 'opening'))
+  const openingTimes = openingTimesForRun(settings.numTickets, settings.maxTicketAgeDays, nowMs)
 
   // Static prefix is identical across every batch. Pass a defined (empty) responseCounts so the
   // averaged directive is omitted here (per-ticket targets live in each batch's dynamic suffix).
@@ -141,7 +162,6 @@ function cmdPlan(args) {
 
   const ctx = {
     version: 1,
-    seed,
     nowMs,
     batchSize,
     prompt,
@@ -152,14 +172,77 @@ function cmdPlan(args) {
     round: 0,
     generatedCount: 0,
     dropped: 0,
+    scenarioCount: scenarioTarget(settings.numTickets),
+    scenarios: [],
+    scenarioCursor: 0,
     tickets: []
   }
-
-  const manifest = buildRound(ctx, outDir, 0, settings.numTickets)
   writeJson(join(outDir, 'run-context.json'), ctx)
 
-  console.log(`PLANNED ${settings.numTickets} ticket(s), batchSize=${batchSize}, staff=${settings.includeStaffResponses}, roster=${roster.length}, seed=${seed}`)
+  const scenarioPromptFile = resolve(join(outDir, 'scenario-prompt.txt'))
+  const scenariosFile = resolve(join(outDir, 'scenarios.json'))
+  writeFileSync(scenarioPromptFile, `${compileScenarioPrompt(prompt, ctx.scenarioCount)}\n`)
+
+  console.log(`PLANNED ${settings.numTickets} ticket(s), batchSize=${batchSize}, staff=${settings.includeStaffResponses}, roster=${roster.length}`)
   console.log(`OUT ${outDir}`)
+  console.log(`SCENARIO ${ctx.scenarioCount} scenario(s) needed. Spawn ONE subagent that reads its PROMPT file and writes its OUT file:`)
+  console.log(`  PROMPT=${scenarioPromptFile} OUT=${scenariosFile}`)
+  console.log('Then run: engine.mjs batches --out <dir>')
+}
+
+// ── batches ─────────────────────────────────────────────────────────────────
+// Reads the scenario list the subagent produced, shuffles it, and builds round 0.
+// Shuffling matters: the model emits the list grouped by whatever categories the prompt implies, so
+// dealing it in order would cluster categories per batch and leave the reserve as one category.
+function cmdBatches(args) {
+  const outDir = resolve(args.out || '.qbort-run')
+  const ctx = readJson(join(outDir, 'run-context.json'))
+  if (!ctx) {
+    console.error('NO_CONTEXT run plan first')
+    process.exit(2)
+  }
+
+  const scenariosPath = join(outDir, 'scenarios.json')
+  let raw = null
+  try {
+    raw = readFileSync(scenariosPath, 'utf8')
+  } catch {
+    console.error(`NO_SCENARIOS ${resolve(scenariosPath)} not found — the scenario subagent must write it before running batches`)
+    process.exit(2)
+  }
+  // Lenient like validateTickets: tolerate fences or stray prose around the JSON object.
+  let parsed = null
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    const start = raw.indexOf('{')
+    const end = raw.lastIndexOf('}')
+    if (start !== -1 && end > start) {
+      try {
+        parsed = JSON.parse(raw.slice(start, end + 1))
+      } catch {
+        /* still unparseable → reported below */
+      }
+    }
+  }
+  const list = Array.isArray(parsed) ? parsed : parsed?.scenarios
+  if (!Array.isArray(list)) {
+    console.error(`BAD_SCENARIOS ${resolve(scenariosPath)} is not a JSON object of shape { "scenarios": [...] }`)
+    process.exit(2)
+  }
+  const cleaned = list.filter((s) => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim())
+  const needed = ctx.settings.numTickets
+  if (cleaned.length < needed) {
+    console.error(`SHORT_SCENARIOS got ${cleaned.length} usable scenario(s), need at least ${needed} (asked for ${ctx.scenarioCount})`)
+    process.exit(2)
+  }
+
+  ctx.scenarios = shuffled(cleaned)
+  ctx.scenarioCursor = 0
+  const manifest = buildRound(ctx, outDir, 0, needed)
+  writeJson(join(outDir, 'run-context.json'), ctx)
+
+  console.log(`SCENARIOS ${ctx.scenarios.length} loaded (${ctx.scenarios.length - needed} held in reserve for top-ups)`)
   printRound(manifest)
 }
 
@@ -182,9 +265,13 @@ function cmdTopup(args) {
     return
   }
   ctx.round = round
+  // Top-ups draw from the scenario reserve. If it runs dry those tickets are generated without a
+  // scenario rather than failing the run — most of the output already exists at this point, so
+  // fail-fast (the rule for the initial scenario call) would be the wrong trade.
+  const reserve = Math.max(0, (ctx.scenarios?.length ?? 0) - ctx.scenarioCursor)
   const manifest = buildRound(ctx, outDir, round, shortfall)
   writeJson(join(outDir, 'run-context.json'), ctx)
-  console.log(`TOPUP round ${round}: shortfall=${shortfall}`)
+  console.log(`TOPUP round ${round}: shortfall=${shortfall}, scenarios available=${Math.min(reserve, shortfall)}`)
   printRound(manifest)
 }
 
@@ -206,10 +293,9 @@ function cmdAssemble(args) {
   const total = ctx.settings.numTickets
   const includeStaffResponses = ctx.settings.includeStaffResponses
   const kept = ctx.tickets
-  const assembleRng = rngFor(ctx.seed, 'assemble', round)
   const timeCtx = {
     nowMs: ctx.nowMs,
-    rng: assembleRng,
+    rng: Math.random,
     openingMsForId: (id) => ctx.openingTimes[id - 1] ?? ctx.nowMs
   }
 
@@ -274,6 +360,9 @@ switch (cmd) {
   case 'plan':
     cmdPlan(args)
     break
+  case 'batches':
+    cmdBatches(args)
+    break
   case 'topup':
     cmdTopup(args)
     break
@@ -281,6 +370,6 @@ switch (cmd) {
     cmdAssemble(args)
     break
   default:
-    console.error('Usage: engine.mjs <plan|topup|assemble> [options]  (see file header)')
+    console.error('Usage: engine.mjs <plan|batches|topup|assemble> [options]  (see file header)')
     process.exit(1)
 }
