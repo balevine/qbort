@@ -146,6 +146,7 @@ the whole file.
 - The engine assigns `id` (sequential), `isStaff` (from the `@company.biz` domain, opener always the
   customer), and `createdAt` (ascending by id, strictly increasing within a ticket). The model is
   never trusted with these — don't post-edit them.
-- Everything is deterministic given the run's seed (printed by `plan`); pass `--seed <n>` to `plan`
-  to reproduce a run.
+- Runs are not reproducible, by design. Ticket content and the scenario list both come from the
+  model, so nothing downstream of them could be reproduced anyway; the engine's own random choices
+  (opening times, per-ticket reply targets, scenario deal order) just use `Math.random`.
 - Requires Node (`node --version`). No npm install — the engine is dependency-free ESM.
