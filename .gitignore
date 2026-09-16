@@ -9,3 +9,4 @@ coverage/
 *.tsbuildinfo
 .notes
 .plans/ideas/
+.qbort-run/

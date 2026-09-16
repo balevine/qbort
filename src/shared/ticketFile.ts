@@ -51,7 +51,9 @@ const metaSchema = z
     model: z.string(),
     requestedCount: z.number(),
     generatedCount: z.number(),
-    usage: usageSchema
+    // Optional so files without token/cost accounting (e.g. skill-generated runs) still load;
+    // when present it must be well-formed, so a truncated/garbled usage block is still rejected.
+    usage: usageSchema.optional()
   })
   .passthrough() // tolerate extra/future meta fields (e.g. settings snapshot)
 

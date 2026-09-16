@@ -219,7 +219,7 @@ Output is written incrementally/atomically so a crash mid-run still leaves a val
   - **Staff messages** (`isStaff: true`): black text on a **slate-grey** background.
   The modal stays within the neo-brutalist language (hard borders, square corners); slate-grey is the one permitted non-pure-monochrome surface, used only to distinguish staff replies.
 - **Filter/search**: by status and free-text over subject + all message bodies/authors (applied before paging).
-- **Summary**: counts by status, total tickets, provider/model, and the `meta.usage` cost/token breakdown for the loaded file.
+- **Summary**: counts by status, total tickets, provider/model, and the `meta.usage` cost/token breakdown for the loaded file. `meta.usage` is **optional** — files produced outside the app (e.g. by the Claude Code generate-tickets skill, which uses ambient-model subagents and has no token/cost accounting) omit it, and the summary shows `—` for those stats. Such files also carry `meta.provider: "claude-skill"`, rendered via a tolerant label (`ticketFileProviderLabel`) so the viewer accepts and displays them.
 
 ---
 

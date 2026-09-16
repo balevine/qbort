@@ -31,6 +31,19 @@ export function isHostedProvider(id: ProviderId): boolean {
   return HOSTED_PROVIDERS.includes(id)
 }
 
+/**
+ * Provider recorded in a tickets file's `meta`. Beyond the two generation providers, a file can
+ * be produced by the Claude Code skill (ambient-model subagents) — which is not a hosted/local
+ * provider and has no token/cost accounting. This union is display metadata only; it never widens
+ * the active-generation `ProviderId` used by the adapters/secrets.
+ */
+export type TicketFileProvider = ProviderId | 'claude-skill'
+
+/** Display label for a tickets-file provider, tolerant of the skill's synthetic id. */
+export function ticketFileProviderLabel(provider: TicketFileProvider): string {
+  return provider === 'claude-skill' ? 'Claude Code (skill)' : PROVIDER_LABELS[provider]
+}
+
 /** A support staff member. Email is derived: `${alias}@company.biz`. */
 export interface StaffMember {
   name: string
@@ -128,12 +141,13 @@ export interface TicketUsage {
 export interface TicketsMeta {
   generatedAt: string
   appVersion: string
-  provider: ProviderId
+  provider: TicketFileProvider
   model: string
   requestedCount: number
   generatedCount: number
   settings: { generation: GenerationSettings }
-  usage: TicketUsage
+  /** Token/cost usage. Absent for files without accounting (e.g. skill-generated runs). */
+  usage?: TicketUsage
 }
 
 /** The on-disk tickets file. */
