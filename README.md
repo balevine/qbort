@@ -73,7 +73,7 @@ Open **Settings** (gear icon). The generation settings are:
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
-| **Number of tickets** | 100 | 1 – 5000 | How many tickets to generate in a run. |
+| **Number of tickets** | 100 | 1 – 500 | How many tickets to generate in a run. |
 | **Include staff responses** | off | — | When off, each ticket has only the customer's opening message. |
 | **Average staff responses** | 0 | 0 – 20 | Mean replies per ticket; the actual count varies around this. |
 | **Number of staff members** | 10 | 1 – 100 | Size of the staff roster used to author replies. |
@@ -97,8 +97,10 @@ At generation time the app **compiles** the final prompt: your text, followed by
 
 1. Click **GENERATE** in the top bar.
 2. You'll see a **cost estimate** first — estimated tokens and cost (Ollama shows `$0 · local`). Nothing runs until you confirm.
-3. Confirm to start. Progress streams live (tickets done, batches, retries) and you can **Cancel** at any time — tickets produced so far are still saved.
+3. Confirm to start. The run opens by generating a list of one-line ticket scenarios, then fans out into parallel batches. Progress streams live (tickets done, batches, retries) and you can **Cancel** at any time — tickets produced so far are still saved.
 4. When the run finishes, the tickets are written to `tickets.json` in your default folder and loaded into the viewer. The file also records the run's real token usage, cost, and duration.
+
+**Why a run is capped at 500 tickets.** Tickets are generated in parallel batches, and each batch is written by a separate model call that can't see the others. Left alone, those calls converge on the same handful of obvious topics and different batches produce near-duplicate tickets. So before any batch runs, the app makes one call that writes a list of one-line scenarios — a few more than the run needs — and deals one to each ticket, which is what keeps batches from overlapping. That list has to come back in a single response, and past roughly 500 tickets it no longer fits in the model's output limit. If you need more than 500, do several runs: each gets its own independent scenario list.
 
 ### Loading existing tickets
 

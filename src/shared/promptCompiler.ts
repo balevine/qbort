@@ -7,6 +7,11 @@ export interface CompilePromptInput {
   editablePrompt: string
   /** How many tickets this batch should produce. */
   batchCount: number
+  /**
+   * One-line scenarios dealt to this batch by the orchestrator (scenario i → ticket i). Omit
+   * (or pass empty) to leave the batch's topics to the model.
+   */
+  scenarios?: string[]
   staff: {
     include: boolean
     avgResponses: number
@@ -109,6 +114,24 @@ function dynamicSuffix(input: CompilePromptInput): string {
       `  [${input.staff.responseCounts.join(', ')}]`
     )
   }
+  // Scenarios are dealt by the orchestrator so that independent batches cannot converge on the
+  // same high-probability topics. They belong in the dynamic suffix: the static prefix is sent as
+  // a cached block (see anthropic.ts), and per-batch text there would break prompt caching.
+  const scenarios = input.scenarios ?? []
+  if (scenarios.length > 0) {
+    lines.push(
+      'Ticket scenarios, in order — ticket 1 uses scenario 1, ticket 2 uses scenario 2, and so on:',
+      ...scenarios.map((s, i) => `  ${i + 1}. ${s}`),
+      'Expand each scenario into a full ticket in its own voice. Do not copy its wording, and do not',
+      'write about anything else.'
+    )
+    if (scenarios.length < input.batchCount) {
+      lines.push(
+        `The remaining ${input.batchCount - scenarios.length} ticket(s) have no scenario — invent them,`,
+        'keeping them clearly distinct from the ones above.'
+      )
+    }
+  }
   return lines.join('\n')
 }
 
@@ -129,4 +152,35 @@ export function compilePromptParts(input: CompilePromptInput): { static: string;
 export function compilePrompt(input: CompilePromptInput): string {
   const { static: prefix, dynamic } = compilePromptParts(input)
   return `${prefix}\n\n${dynamic}`
+}
+
+/**
+ * How many scenarios to ask for when generating `count` tickets. The surplus is the reserve that
+ * top-up rounds draw from, so a re-generated ticket gets a fresh scenario rather than a repeat.
+ */
+export function scenarioTarget(count: number): number {
+  return Math.max(count + 3, Math.ceil(count * 1.3))
+}
+
+/**
+ * The one-shot call that produces the whole scenario list. Asking for more one-liners than the
+ * user's prompt has examples forces invention, and generating them in a single call lets the model
+ * see the whole list while writing it — the same thing that keeps within-batch tickets distinct.
+ */
+export function compileScenarioPrompt(editablePrompt: string, count: number): string {
+  const editable = (editablePrompt ?? '').trim()
+  const requirements = [
+    DELIMITER,
+    'OUTPUT REQUIREMENTS (enforced by the app — follow exactly)',
+    DELIMITER,
+    `Produce EXACTLY ${count} one-line ticket scenarios, numbered 1 to ${count}.`,
+    'Follow the category mix described above (if one is described).',
+    'Any examples above are illustrative and are already covered. Do not reuse them.',
+    'Make each scenario distinct in what it is about AND in who is writing it.',
+    'Return ONLY a JSON object — no prose, no markdown fences — of this shape:',
+    '',
+    '{ "scenarios": ["...", "...", ...] }',
+    DELIMITER
+  ].join('\n')
+  return editable ? `${editable}\n\n${requirements}` : requirements
 }

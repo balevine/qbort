@@ -16,6 +16,12 @@ export const MAX_RESPONSES_PER_TICKET = 30
 export const OUTPUT_TOKENS_PER_TICKET = 180
 export const OUTPUT_TOKENS_PER_RESPONSE = 90
 
+/**
+ * Rough size of one one-line scenario. Used twice: to budget the scenario call's `max_tokens`,
+ * and to price both that call's output and the scenario block each batch prompt carries.
+ */
+export const OUTPUT_TOKENS_PER_SCENARIO = 60
+
 /** Estimated output tokens for one ticket given the staff-response settings. */
 export function estimatedTokensPerTicket(includeStaffResponses: boolean, avgStaffResponses: number): number {
   return OUTPUT_TOKENS_PER_TICKET + (includeStaffResponses ? avgStaffResponses * OUTPUT_TOKENS_PER_RESPONSE : 0)

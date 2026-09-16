@@ -2,9 +2,15 @@
 // dialog collects is re-clamped here regardless of what was typed, so out-of-range answers can't
 // reach the engine.
 
-/** Bounds for the numeric settings (shared by the desktop app's sliders and validation). */
+/**
+ * Bounds for the numeric settings (shared by the desktop app's sliders and validation).
+ *
+ * `numTickets` is capped at 500 by the scenario pass: the run's whole scenario list is produced by
+ * one subagent call, and much past 650 one-liners that single response gets unreliable. Raising
+ * the cap means splitting that call across several subagents first.
+ */
 export const LIMITS = {
-  numTickets: { min: 1, max: 5000, default: 100 },
+  numTickets: { min: 1, max: 500, default: 100 },
   avgStaffResponses: { min: 0, max: 20, default: 0 },
   numStaffMembers: { min: 1, max: 100, default: 10 },
   maxTicketAgeDays: { min: 1, max: 3650, default: 90 }

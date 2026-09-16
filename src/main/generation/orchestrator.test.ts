@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { backoffMs, backoffWithJitter, runGeneration, type BatchSnapshot } from './orchestrator'
-import { ProviderError, TruncationError, type GenerateBatchResult, type LLMProvider } from './providers'
+import {
+  ProviderError,
+  TruncationError,
+  type GenerateBatchArgs,
+  type GenerateBatchResult,
+  type LLMProvider
+} from './providers'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import type { GenerationProgress, Settings } from '@shared/types'
 
@@ -13,6 +19,20 @@ function rawTickets(n: number): unknown {
       status: 'open',
       from: { name: `Cust ${i}`, email: `cust${i}@example.com` }
     }))
+  }
+}
+
+/**
+ * Every run now opens with one scenario call, identifiable by having no `staticPrefix` (it has no
+ * cacheable half). The stubs below answer it and return early, so their `calls` counters and
+ * `callIndex` arguments keep counting only ticket batches and the existing assertions still read
+ * as statements about batching. Zero usage keeps the token-accounting assertions batch-only;
+ * scenario-call accounting has its own test.
+ */
+function scenarioReply(count: number): GenerateBatchResult {
+  return {
+    raw: { scenarios: Array.from({ length: count }, (_, i) => `Scenario ${i + 1}`) },
+    usage: { inputTokens: 0, outputTokens: 0 }
   }
 }
 
@@ -32,7 +52,8 @@ function fakeProvider(
     id: 'ollama' as const,
     model: 'test-model',
     calls: 0,
-    async generateBatch({ count }: { count: number }): Promise<GenerateBatchResult> {
+    async generateBatch({ count, staticPrefix }: { count: number; staticPrefix?: string }): Promise<GenerateBatchResult> {
+      if (staticPrefix === undefined) return scenarioReply(count)
       const idx = calls++
       provider.calls = calls
       onCall?.(idx)
@@ -60,7 +81,8 @@ function droppingProvider(
     id: 'ollama' as const,
     model: 'test-model',
     calls: 0,
-    async generateBatch({ count }: { count: number }): Promise<GenerateBatchResult> {
+    async generateBatch({ count, staticPrefix }: { count: number; staticPrefix?: string }): Promise<GenerateBatchResult> {
+      if (staticPrefix === undefined) return scenarioReply(count)
       const idx = calls++
       provider.calls = calls
       const drop = dropPerCall(idx, count)
@@ -183,7 +205,8 @@ describe('runGeneration', () => {
     const provider: LLMProvider = {
       id: 'ollama',
       model: 'm',
-      async generateBatch({ count, onToken }) {
+      async generateBatch({ count, onToken, staticPrefix }) {
+        if (staticPrefix === undefined) return scenarioReply(count)
         onToken?.({ outputTokens: 50 })
         onToken?.({ outputTokens: 100 })
         const tickets = Array.from({ length: count }, (_, i) => ({
@@ -248,7 +271,8 @@ describe('runGeneration', () => {
     const provider: LLMProvider = {
       id: 'anthropic',
       model: 'm',
-      async generateBatch({ count, maxOutputTokens }) {
+      async generateBatch({ count, maxOutputTokens, staticPrefix }) {
+        if (staticPrefix === undefined) return scenarioReply(count)
         if (firstBudget === undefined) {
           firstBudget = maxOutputTokens
           throw new TruncationError('anthropic')
@@ -276,7 +300,8 @@ describe('runGeneration', () => {
     const provider: LLMProvider = {
       id: 'anthropic',
       model: 'm',
-      async generateBatch({ count }) {
+      async generateBatch({ count, staticPrefix }) {
+        if (staticPrefix === undefined) return scenarioReply(count)
         if (count > 1) throw new TruncationError('anthropic')
         return { raw: rawTickets(count), usage: { inputTokens: 1, outputTokens: 1 } }
       }
@@ -298,7 +323,8 @@ describe('runGeneration', () => {
     const provider: LLMProvider = {
       id: 'ollama',
       model: 'm',
-      async generateBatch({ count }) {
+      async generateBatch({ count, staticPrefix }) {
+        if (staticPrefix === undefined) return scenarioReply(count)
         return { raw: rawTickets(count + 3), usage: { inputTokens: 1, outputTokens: 1 } }
       }
     }
@@ -377,5 +403,216 @@ describe('runGeneration', () => {
     })
     expect(snapshots).toHaveLength(3)
     expect(snapshots.map((s) => s.tickets.length)).toEqual([4, 8, 10])
+  })
+})
+
+describe('runGeneration scenario pass', () => {
+  /**
+   * A provider that answers the scenario call with `scenarios` distinct one-liners (or a caller-
+   * supplied `raw`), records every batch's dynamic suffix, and returns valid tickets.
+   */
+  function scenarioProvider(opts: {
+    scenarioRaw?: (attempt: number) => unknown
+    scenarioUsage?: { inputTokens: number; outputTokens: number }
+  } = {}): LLMProvider & { suffixes: string[]; scenarioCalls: number; batchCalls: number } {
+    const provider = {
+      id: 'ollama' as const,
+      model: 'm',
+      suffixes: [] as string[],
+      scenarioCalls: 0,
+      batchCalls: 0,
+      async generateBatch({ count, staticPrefix, dynamicSuffix }: GenerateBatchArgs): Promise<GenerateBatchResult> {
+        if (staticPrefix === undefined) {
+          const attempt = provider.scenarioCalls++
+          const raw = opts.scenarioRaw
+            ? opts.scenarioRaw(attempt)
+            : { scenarios: Array.from({ length: count }, (_, i) => `Scenario ${i + 1}`) }
+          return { raw, usage: opts.scenarioUsage ?? { inputTokens: 0, outputTokens: 0 } }
+        }
+        provider.batchCalls++
+        provider.suffixes.push(dynamicSuffix ?? '')
+        return { raw: rawTickets(count), usage: { inputTokens: 1, outputTokens: 1 } }
+      }
+    }
+    return provider
+  }
+
+  /** Every `N. <scenario>` line across all recorded batch prompts. */
+  const dealtScenarios = (suffixes: string[]): string[] =>
+    suffixes.flatMap((s) => [...s.matchAll(/^ {2}\d+\. (Scenario \d+)$/gm)].map((m) => m[1]))
+
+  it('deals one distinct scenario per ticket across every batch', async () => {
+    const provider = scenarioProvider()
+    const result = await runGeneration({
+      provider,
+      settings: settingsWith(10),
+      signal: new AbortController().signal,
+      batchSize: 4,
+      concurrency: 1,
+      sleep: noSleep
+    })
+
+    expect(result.tickets).toHaveLength(10)
+    expect(provider.scenarioCalls).toBe(1) // one call for the whole run, not one per batch
+    const dealt = dealtScenarios(provider.suffixes)
+    expect(dealt).toHaveLength(10) // 4 + 4 + 2, one per ticket
+    expect(new Set(dealt).size).toBe(10) // and no scenario handed to two batches
+  })
+
+  it('asks for a buffer beyond the ticket count and holds the surplus back', async () => {
+    const provider = scenarioProvider()
+    await runGeneration({
+      provider,
+      settings: settingsWith(10),
+      signal: new AbortController().signal,
+      batchSize: 10,
+      concurrency: 1,
+      sleep: noSleep
+    })
+    // scenarioTarget(10) = 13 requested, 10 dealt, 3 kept in reserve for top-ups.
+    expect(provider.suffixes).toHaveLength(1)
+    expect(dealtScenarios(provider.suffixes)).toHaveLength(10)
+  })
+
+  it('draws top-up scenarios from the reserve instead of repeating dealt ones', async () => {
+    // Every ticket of the first batch is invalid, so a top-up round runs for the shortfall.
+    let call = 0
+    const provider = {
+      id: 'ollama' as const,
+      model: 'm',
+      suffixes: [] as string[],
+      async generateBatch({ count, staticPrefix, dynamicSuffix }: GenerateBatchArgs): Promise<GenerateBatchResult> {
+        if (staticPrefix === undefined) {
+          return {
+            raw: { scenarios: Array.from({ length: count }, (_, i) => `Scenario ${i + 1}`) },
+            usage: { inputTokens: 0, outputTokens: 0 }
+          }
+        }
+        provider.suffixes.push(dynamicSuffix ?? '')
+        const spoil = call++ === 0
+        const tickets = Array.from({ length: count }, (_, i) => ({
+          subject: `S${i}`,
+          body: `B${i}`,
+          status: 'open',
+          from: spoil ? { name: `C${i}` } : { name: `C${i}`, email: `c${i}@example.com` }
+        }))
+        return { raw: { tickets }, usage: { inputTokens: 1, outputTokens: 1 } }
+      }
+    }
+
+    const result = await runGeneration({
+      provider,
+      settings: settingsWith(3),
+      signal: new AbortController().signal,
+      batchSize: 3,
+      concurrency: 1,
+      sleep: noSleep
+    })
+
+    expect(result.tickets).toHaveLength(3)
+    const dealt = dealtScenarios(provider.suffixes)
+    // scenarioTarget(3) = 6: three dealt to the failed first batch, three fresh from the reserve.
+    expect(dealt).toHaveLength(6)
+    expect(new Set(dealt).size).toBe(6)
+  })
+
+  it('generates tickets without scenarios once the reserve runs dry', async () => {
+    // Only 4 scenarios come back for a 3-ticket run: enough to start (>= 3), but the reserve is 1,
+    // so the second top-up batch outruns it and must proceed unscripted rather than fail.
+    let call = 0
+    const provider = {
+      id: 'ollama' as const,
+      model: 'm',
+      suffixes: [] as string[],
+      async generateBatch({ count, staticPrefix, dynamicSuffix }: GenerateBatchArgs): Promise<GenerateBatchResult> {
+        if (staticPrefix === undefined) {
+          return {
+            raw: { scenarios: ['one', 'two', 'three', 'four'] },
+            usage: { inputTokens: 0, outputTokens: 0 }
+          }
+        }
+        provider.suffixes.push(dynamicSuffix ?? '')
+        // Batches 0 and 1 produce nothing usable; the last one succeeds.
+        const spoil = call++ < 2
+        const tickets = Array.from({ length: count }, (_, i) => ({
+          subject: `S${i}`,
+          body: `B${i}`,
+          status: 'open',
+          from: spoil ? { name: `C${i}` } : { name: `C${i}`, email: `c${i}@example.com` }
+        }))
+        return { raw: { tickets }, usage: { inputTokens: 1, outputTokens: 1 } }
+      }
+    }
+
+    const result = await runGeneration({
+      provider,
+      settings: settingsWith(3),
+      signal: new AbortController().signal,
+      batchSize: 3,
+      concurrency: 1,
+      sleep: noSleep
+    })
+
+    const scenarioLines = (s: string): number => [...s.matchAll(/^ {2}\d+\. /gm)].length
+
+    expect(result.tickets).toHaveLength(3)
+    expect(scenarioLines(provider.suffixes[0])).toBe(3) // first batch fully scripted
+    // First top-up: only one left in the reserve, so the other two tickets are declared free.
+    expect(scenarioLines(provider.suffixes[1])).toBe(1)
+    expect(provider.suffixes[1]).toContain('The remaining 2 ticket(s) have no scenario')
+    // Second top-up: reserve exhausted, so no scenario block at all — but the run still finished.
+    expect(scenarioLines(provider.suffixes[2])).toBe(0)
+    expect(provider.suffixes[2]).toContain('EXACTLY 3 unique ticket(s)')
+  })
+
+  it('retries the scenario call when the list comes back unusable, then proceeds', async () => {
+    const provider = scenarioProvider({
+      scenarioRaw: (attempt) =>
+        attempt === 0
+          ? { nonsense: true } // wrong shape
+          : { scenarios: Array.from({ length: 8 }, (_, i) => `Scenario ${i + 1}`) }
+    })
+    const result = await runGeneration({
+      provider,
+      settings: settingsWith(5),
+      signal: new AbortController().signal,
+      batchSize: 5,
+      concurrency: 1,
+      sleep: noSleep
+    })
+    expect(provider.scenarioCalls).toBe(2)
+    expect(result.tickets).toHaveLength(5)
+    expect(dealtScenarios(provider.suffixes)).toHaveLength(5)
+  })
+
+  it('fails the whole run rather than generating without scenarios', async () => {
+    const provider = scenarioProvider({ scenarioRaw: () => ({ scenarios: ['just one'] }) })
+    await expect(
+      runGeneration({
+        provider,
+        settings: settingsWith(5),
+        signal: new AbortController().signal,
+        batchSize: 5,
+        concurrency: 1,
+        sleep: noSleep
+      })
+    ).rejects.toThrow(/Could not generate ticket scenarios after 3 attempts/)
+    expect(provider.scenarioCalls).toBe(3)
+    expect(provider.batchCalls).toBe(0) // no tickets billed for after a failed scenario pass
+  })
+
+  it('counts the scenario call towards the run usage', async () => {
+    const provider = scenarioProvider({ scenarioUsage: { inputTokens: 40, outputTokens: 400 } })
+    const result = await runGeneration({
+      provider,
+      settings: settingsWith(4),
+      signal: new AbortController().signal,
+      batchSize: 4,
+      concurrency: 1,
+      sleep: noSleep
+    })
+    expect(result.usage.inputTokens).toBe(41) // 40 scenario + 1 batch
+    expect(result.usage.outputTokens).toBe(401)
+    expect(result.usage.batches).toBe(1) // the scenario call is not a ticket batch
   })
 })
