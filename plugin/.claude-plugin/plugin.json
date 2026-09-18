@@ -2,10 +2,10 @@
   "name": "qbort",
   "displayName": "Qbort",
   "version": "0.2.0",
-  "description": "Generate fake customer-support tickets with Claude, from a prompt file and a short settings Q&A.",
+  "description": "Generate fake customer support tickets with Claude using a prompt file and a brief Q&A.",
   "author": {
     "name": "Brian Levine",
-    "email": "balevine@gmail.com",
+    "email": "brian@balevine.com",
     "url": "https://github.com/balevine"
   },
   "homepage": "https://github.com/balevine/qbort",

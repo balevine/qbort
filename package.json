@@ -1,7 +1,7 @@
 {
   "name": "qbort",
   "private": true,
-  "description": "Claude Code plugin that generates fake customer support tickets with Claude. This package is the test harness only — the plugin ships from plugin/ and its version lives in plugin/.claude-plugin/plugin.json.",
+  "description": "Claude Code plugin that generates fake customer support tickets with Claude. This package is the test harness only. The plugin ships from plugin/ and its version lives in plugin/.claude-plugin/plugin.json.",
   "author": "Brian Levine <balevine@gmail.com>",
   "license": "MIT",
   "scripts": {

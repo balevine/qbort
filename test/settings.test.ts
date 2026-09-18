@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { LIMITS, clampGeneration } from '@lib/settings.mjs'
 
 // Settings are never persisted. The skill collects answers in a Q&A and hands them straight to
-// `plan`, so clamping is the whole contract.
+// `plan`, so `clampGeneration` is the only thing between a raw answer and the engine.
 
 const DEFAULTS = {
   numTickets: LIMITS.numTickets.default,

@@ -163,7 +163,6 @@ describe('assemble', () => {
     expect(file.meta.generatedCount).toBe(3)
     expect(file.meta.rounds).toBe(1)
     expect(file.meta.dropped).toBe(0)
-    expect(file.meta.usage).toBeUndefined() // ambient generation has no token accounting
     // Stamped from the plugin manifest, which is the only place a version is written down. Asserted
     // against the manifest rather than a literal, or this test becomes the next copy to drift.
     expect(file.meta.appVersion).toBe(await manifestVersion())

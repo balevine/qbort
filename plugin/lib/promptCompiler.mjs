@@ -14,7 +14,8 @@ import { staffEmail } from './staff.mjs'
  * @property {boolean} include
  * @property {number} avgResponses
  * @property {StaffMember[]} roster
- * @property {number[]} [responseCounts] per-ticket targets (length === batchCount); omit for an averaged directive
+ * @property {number[]} [responseCounts] how many staff replies each ticket in this batch should get,
+ *   one entry per ticket. Leave it out and the prompt asks for an average across the batch instead.
  */
 
 /**

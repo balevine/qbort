@@ -2,14 +2,14 @@
   "name": "qbort",
   "owner": {
     "name": "Brian Levine",
-    "email": "balevine@gmail.com",
+    "email": "brian@balevine.com",
     "url": "https://github.com/balevine"
   },
   "plugins": [
     {
       "name": "qbort",
       "source": "./plugin",
-      "description": "Generate fake customer-support tickets with Claude, from a prompt file and a short settings Q&A.",
+      "description": "Generate fake customer support tickets with Claude using a prompt file and a brief Q&A.",
       "homepage": "https://github.com/balevine/qbort",
       "repository": "https://github.com/balevine/qbort",
       "license": "MIT",

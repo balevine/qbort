@@ -4,9 +4,9 @@
 //
 // The split exists so the scratch can be wiped unconditionally at the start of every run. Working
 // files sit at fixed names (`round-0.json`, `batch-0-0.json`) that *subagents*, not the engine, are
-// expected to fill, so a leftover file from a previous run is byte-indistinguishable from a fresh
-// one and gets folded into the new output silently. Wiping fixes that, and the product has to live
-// outside the wipe for the wipe to be safe.
+// expected to fill. The engine has no way to tell a leftover file from a previous run apart from one
+// a subagent just wrote, so without the wipe, stale tickets get folded into the new output silently.
+// The product has to live outside the wipe for the wipe to be safe.
 
 /** Run state, compiled prompts, raw subagent output. Wiped completely at the start of every run. */
 export const SCRATCH_DIR = '.qbort-run'

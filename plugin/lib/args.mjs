@@ -11,7 +11,6 @@
  * @returns {Record<string, string | boolean> & { _: string[] }}
  */
 export function parseArgs(argv) {
-  /** @type {Record<string, string | boolean> & { _: string[] }} */
   const out = { _: [] }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]

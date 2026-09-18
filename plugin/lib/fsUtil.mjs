@@ -1,7 +1,7 @@
 // Atomic writes (create dir → write unique temp → rename) so a crash mid-write never leaves a
 // half-written file and concurrent writers can't clobber each other's temp file. Every file the
-// engine produces goes through here. A torn `tickets.json` is the run's whole output, and a torn
-// prompt file is a batch of garbage tickets.
+// engine produces goes through here. A half-written `tickets.json` is the run's whole output lost,
+// and a half-written prompt file is a batch of garbage tickets.
 
 import { promises as fs } from 'node:fs'
 import { dirname } from 'node:path'

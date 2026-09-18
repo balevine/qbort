@@ -306,10 +306,8 @@ async function cmdAssemble(args) {
 
   const file = {
     meta: {
-      // `provider: 'claude-skill'` is display metadata. There is no `usage` block, because ambient
-      // generation is not a metered API call and produces no token or cost numbers to report. The
-      // format makes that block optional. The extra fields below are tolerated by its passthrough
-      // meta.
+      // `provider: 'claude-skill'` is display metadata. The extra fields below are tolerated by the
+      // format's passthrough meta.
       generatedAt: new Date(ctx.nowMs).toISOString(),
       appVersion: await pluginVersion(),
       provider: 'claude-skill',

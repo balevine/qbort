@@ -3,10 +3,8 @@
 // producer with no definition of what it produces is how the two drift apart without either one
 // ever failing.
 //
-// Structure is validated strictly (that's what makes a viewer safe against, most importantly, older
-// files from before the `messages[]` migration, with flat `body`/`responses` and string ids, which
-// would otherwise render past `messages[0]` and crash a renderer into a blank page). `status` and
-// `provider` stay permissive strings so a merely-unusual-but-renderable file isn't needlessly
+// Structure is validated strictly, which is what makes a file safe to hand to a renderer. `status`
+// and `provider` stay permissive strings so a merely-unusual-but-renderable file isn't needlessly
 // rejected, and unknown `meta` fields are tolerated so the format can grow.
 
 /**
@@ -23,11 +21,6 @@ function isString(v) {
 
 function isNumber(v) {
   return typeof v === 'number' && Number.isFinite(v)
-}
-
-/** Every key must be present and a finite number. */
-function hasNumberFields(v, keys) {
-  return isObject(v) && keys.every((k) => isNumber(v[k]))
 }
 
 function isAuthor(v) {
@@ -50,26 +43,6 @@ function isTicket(v) {
   )
 }
 
-/**
- * Token/cost accounting. Optional, because ambient-Claude runs have none. A *present* block must
- * be complete though, so a truncated or garbled one is still rejected rather than half-read.
- */
-function isUsage(v) {
-  return (
-    hasNumberFields(v, [
-      'inputTokens',
-      'outputTokens',
-      'totalTokens',
-      'batches',
-      'estimatedCostUsd',
-      'actualCostUsd',
-      'durationMs'
-    ]) &&
-    hasNumberFields(v.pricing, ['inputPerM', 'outputPerM']) &&
-    isString(v.pricing.currency)
-  )
-}
-
 function isMeta(v) {
   return (
     isObject(v) &&
@@ -78,8 +51,7 @@ function isMeta(v) {
     isString(v.provider) &&
     isString(v.model) &&
     isNumber(v.requestedCount) &&
-    isNumber(v.generatedCount) &&
-    (v.usage === undefined || isUsage(v.usage))
+    isNumber(v.generatedCount)
   )
 }
 

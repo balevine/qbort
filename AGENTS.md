@@ -4,13 +4,11 @@ Guidance for agentic coding tools working in this repo. Keep changes consistent 
 
 `README.md` is the canonical description of how the plugin behaves. When behavior changes, that is the file to update, along with this one and the skill's own README for anything they cover.
 
-`.plans/` is **gitignored, local-only** scratch and is not a source of truth. `.plans/PROJECT_SPEC.md` in particular is a **historical document** (the spec the original Electron app was built from). Read it for background if it's there, but **do not keep it in sync**. It won't exist in a fresh clone. This file plus the two READMEs are the whole picture.
+`.plans/` is gitignored and local-only and is not a source of truth for the state of the codebase.
 
 ## What this is
 
-A **Claude Code plugin** that generates fake customer-support tickets. The user supplies a `TICKET_PROMPT.md` and answers a short settings Q&A; the ambient Claude model (via parallel subagents) writes ticket content; a deterministic, dependency-free Node engine owns everything structural and writes a `tickets.json`. No app, no UI, no provider, no API key. The only product is the JSON file.
-
-It used to be an Electron desktop app with Anthropic and Ollama providers. That app is deleted, not deprecated. The output format is unchanged, so old files still load in the viewers that read them.
+A **Claude Code plugin** that generates fake customer support tickets. The user supplies a `TICKET_PROMPT.md` file and answers a short settings Q&A. The ambient Claude model (via parallel subagents) writes ticket content. A deterministic, dependency-free Node engine owns everything structural and writes a `tickets.json` output file. The only product is the JSON file.
 
 ## Structure & the engine/model boundary
 
@@ -21,9 +19,9 @@ It used to be an Electron desktop app with Anthropic and Ollama providers. That 
 - `test/`: vitest, in TypeScript, importing `plugin/lib` through the `@lib/*` alias.
 - `scripts/`: repo-local dev tools, outside the shipped plugin. `view-tickets.mjs` reads a tickets file in the terminal (list, thread, filter, `--stats`), defaulting to the newest run in `qbort-output/` and loading it through `lib/ticketFile.mjs` so the viewer and the writer agree on the format. Nothing under `plugin/` imports it.
 
-**Hard rule:** the engine owns structure, the model owns content. `id` (sequential int), `isStaff` (from the `@company.biz` domain, opener always the customer), and `createdAt` (synthesized, ascending by id, strictly increasing within a ticket) are assigned by the engine and never trusted from the model. Ticket shape: `{ id, subject, status, messages: [{ from, body, isStaff, createdAt }] }` (opening message is `messages[0]`). The engine never touches the network and has no credentials.
+**Hard rule:** the engine owns structure, the model owns content. `id` (sequential int), `isStaff` (from the `@company.biz` domain, opener always the customer), and `createdAt` (synthesized, ascending by id, strictly increasing within a ticket) are assigned by the engine and never trusted from the model. Ticket shape: `{ id, subject, status, messages: [{ from, body, isStaff, createdAt }] }` (opening message is `messages[0]`). That shape is frozen, so files from older runs still load in the viewers that read them. The engine never touches the network and has no credentials.
 
-**Second hard rule:** if a change *decides* something (a bound, a shape, a repair rule), it belongs in `lib/`, not in `engine.mjs`.
+**Second hard rule:** policy lives in `lib/`. If code decides a value (a bound, a shape, a repair rule, an output filename), it belongs in a `lib/` function that tests can call directly. `engine.mjs` should only call those functions, read and write files, and set exit codes.
 
 ## Generation pipeline
 
@@ -31,7 +29,7 @@ It used to be an Electron desktop app with Anthropic and Ollama providers. That 
 
 The scenario pass exists because batch prompts are otherwise byte-identical and independent batches converge on the same topics. A missing or short scenario list **fails the run** (`batches` exits non-zero) rather than producing duplicate-heavy tickets at full cost; a reserve that runs dry mid-top-up does not, because most of the output already exists by then.
 
-**Two directories, neither configurable.** `.qbort-run/` is scratch and `qbort-output/` is the product, both hardcoded relative to the working directory (`lib/paths.mjs`). There is no `--out`: the engine takes no path from its caller, which is what makes `plan`'s unconditional wipe of `.qbort-run/` safe. The wipe is the point of the split. Batch files sit at fixed names that *subagents*, not the engine, are expected to write, so a leftover `batch-0-0.json` from a previous run is byte-indistinguishable from a fresh one and would be assembled into the new output silently. Output filenames are timestamped (`tickets-YYYYMMDD-HHMMSS.json`) and **stamped once, at `plan`**, then carried in `run-context.json`. `assemble` runs again after every top-up round, so naming the file at write time would leave a run that needed two top-ups with three files, all looking finished and only the last complete.
+**Two directories, neither configurable.** `.qbort-run/` is scratch and `qbort-output/` is the product, both hardcoded relative to the working directory (`lib/paths.mjs`). There is no `--out`: the engine takes no path from its caller, which is what makes `plan`'s unconditional wipe of `.qbort-run/` safe. The wipe is the point of the split. Batch files sit at fixed names that *subagents*, not the engine, are expected to write, and the engine has no way to tell a leftover `batch-0-0.json` from a previous run apart from one a subagent just wrote, so without the wipe it would be assembled into the new output silently. Output filenames are timestamped (`tickets-YYYYMMDD-HHMMSS.json`) and **stamped once, at `plan`**, then carried in `run-context.json`. `assemble` runs again after every top-up round, so naming the file at write time would leave a run that needed two top-ups with three files, all looking finished and only the last complete.
 
 Every engine write is atomic, and every named failure has an exit code `SKILL.md` can branch on (`MISSING_PROMPT`, `NO_CONTEXT`, `NO_SCENARIOS`, `BAD_SCENARIOS`, `SHORT_SCENARIOS`, `BAD_ROUND`, `NO_ROUND` → 2; `BAD_OUTPUT` → 3).
 
@@ -53,11 +51,9 @@ Every engine write is atomic, and every named failure has an exit code `SKILL.md
 The skill lives in `plugin/skills/generate-tickets/`, **not** in `.claude/skills/`, so Claude Code does not discover it from the working tree. It is picked up only through a plugin install, and the repo root is its own marketplace (`.claude-plugin/marketplace.json` pointing at `./plugin`). To work on it here:
 
 ```
-/plugin marketplace add ~/projects/qbort
+/plugin marketplace add <path/to/qbort>   # a real path to the repo root, not `.`
 /plugin install qbort@qbort
 ```
-
-A bare `.` is not enough for the `marketplace add`. Give it a real path to the repo root.
 
 The plugin's agent registers **namespaced**, as `qbort:ticket-batch`, not as the bare `name:` in its frontmatter. `SKILL.md` spawns it by that name, so a rename of the plugin renames the agent type too.
 
@@ -71,7 +67,7 @@ The engine itself needs none of this. It is plain `node` with no dependencies, s
 
 `npm test` · `npm run test:watch` · `npm run typecheck`. There is no build, no dev server, and no packaging step, because the plugin ships the sources it runs. Run `typecheck` + `test` before considering a change done.
 
-To read a run's output without leaving the terminal: `node scripts/view-tickets.mjs --stats`, then `--id 7` for a thread or `--page 2` for the next page of the list. `--help` prints the flags. It defaults to the newest file in `qbort-output/` (pass a path for an older run) and pages by default, so pointing it at a several-hundred-ticket run is safe.
+To read a run's output without leaving the terminal: `node scripts/view-tickets.mjs --stats`, then `--id 7` for a thread or `--page 2` for the next page of the list. `--help` prints the flags. It defaults to the newest file in `qbort-output/` (pass a path for an older run) and paginates by default, so pointing it at a several-hundred-ticket run is safe.
 
 ## Notes
 

@@ -1,6 +1,6 @@
 # generate-tickets (Claude Code skill)
 
-The skill inside the [Qbort](../../../README.md) plugin. It generates fake customer-support tickets and writes them to a `tickets.json`: the **ambient Claude model** (via parallel subagents) produces ticket content, while a small, dependency-free Node engine owns everything structural.
+The skill inside the [Qbort](../../../README.md) plugin. It generates fake customer support tickets and writes them to a `tickets.json`: the **ambient Claude model** (via parallel subagents) produces ticket content, while a small, dependency-free Node engine owns everything structural.
 
 There is no API key and no `npm install`. If you're in [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and want a tickets dataset from a prompt file plus a few questions, this is the whole product.
 
@@ -23,7 +23,7 @@ The skill ships inside the `qbort` plugin, not as a loose folder, because it nee
 ## Usage
 
 1. `cd` into the directory where you want the output (the skill reads/writes there).
-2. Create a **`TICKET_PROMPT.md`** describing what you're supporting (product context, ticket categories, and the kinds of users who file tickets). This is the creative half of the prompt. The engine-enforced output requirements (JSON schema, per-batch counts, allowed statuses, staff rules) are appended automatically at generation time. If the file is missing, the skill scaffolds a starter from `templates/TICKET_PROMPT.md` and stops so you can edit it.
+2. Create a **`TICKET_PROMPT.md`** describing what you're supporting (product context, ticket categories, and the kinds of users who file tickets). This is the creative half of the prompt. The engine-enforced output requirements (JSON schema, per-batch counts, allowed statuses, staff rules) are appended automatically at generation time. If the file is missing, the skill scaffolds a starter from `templates/TICKET_PROMPT.md` and runs off it, so a first run works with no setup. Edit it and run again to get tickets about your own product.
 3. Invoke the skill by typing **`/qbort:generate-tickets`**. Asking in natural language ("generate some fake support tickets") does *not* trigger it: the skill sets `disable-model-invocation: true`, which keeps its description out of every session's startup context at the cost of only firing when you name it.
 4. Answer the short **settings Q&A**: ticket count, whether to include staff reply threads (and the average per ticket), staff-roster size, and how far back to spread ticket open times. Every answer is re-clamped to safe ranges.
 5. The skill generates in parallel batches and writes **`qbort-output/tickets-YYYYMMDD-HHMMSS.json`**, reporting the exact path when it finishes.
@@ -34,13 +34,13 @@ Two directories, both worth adding to `.gitignore`. `.qbort-run/` is scratch (ru
 
 The tickets file matches the Qbort ticket shape: `{ meta, tickets: [{ id, subject, status, messages: [{ from, body, isStaff, createdAt }] }] }`. The engine assigns the `id` (sequential), `isStaff` (staff = `@company.biz` domain; the opener is always the customer), and `createdAt` (ascending by id, strictly increasing within a ticket, never in the future).
 
-Its `meta.provider` is `claude-skill` and it has no `usage` block, because ambient generation isn't a metered API call and produces no token or cost numbers. That block is optional in the format, so a file without it is still valid.
+Its `meta.provider` is `claude-skill`.
 
 ## How it works
 
 ```
 skill (SKILL.md drives Claude):
-  ├─ ensure TICKET_PROMPT.md            (scaffold + stop if missing)
+  ├─ ensure TICKET_PROMPT.md            (scaffold a starter if missing)
   ├─ settings Q&A                       (AskUserQuestion; re-clamped by the engine)
   ├─ engine.mjs plan                    (wipe .qbort-run/, roster, opening times, scenario prompt,
   │                                       output filename, run-context.json)

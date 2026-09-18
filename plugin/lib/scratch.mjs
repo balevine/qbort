@@ -7,7 +7,7 @@ import { promises as fs } from 'node:fs'
  * Remove `dir` and everything in it, then recreate it empty.
  *
  * A recursive remove is safe here only because callers pass `SCRATCH_DIR` resolved against the
- * working directory and nothing else: there is no caller-supplied path for this to follow. Keep it
+ * working directory and nothing else. There is no caller-supplied path for this to follow. Keep it
  * that way.
  *
  * @param {string} dir

@@ -13,17 +13,7 @@ const validFile = {
     model: 'test',
     requestedCount: 1,
     generatedCount: 1,
-    settings: { generation: {} },
-    usage: {
-      inputTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
-      batches: 1,
-      estimatedCostUsd: 0,
-      actualCostUsd: 0,
-      pricing: { inputPerM: 0, outputPerM: 0, currency: 'USD' },
-      durationMs: 1
-    }
+    settings: { generation: {} }
   },
   tickets: [
     {
@@ -80,16 +70,10 @@ describe('parseTicketFile', () => {
     }
   })
 
-  it('rejects a file whose meta usage block is malformed', () => {
-    const bad = { ...validFile, meta: { ...validFile.meta, usage: { inputTokens: 0 } } }
-    expect(parseTicketFile(bad)).toBeNull()
-  })
-
-  it('accepts a skill-generated file with no usage block and the claude-skill provider', () => {
-    const { usage: _usage, ...metaNoUsage } = validFile.meta
+  it('accepts a skill-generated file, whose provider and model are its own strings', () => {
     const skillFile = {
       ...validFile,
-      meta: { ...metaNoUsage, provider: 'claude-skill', model: 'Claude Code subagents' }
+      meta: { ...validFile.meta, provider: 'claude-skill', model: 'Claude Code subagents' }
     }
     expect(parseTicketFile(skillFile)).toEqual(skillFile)
   })

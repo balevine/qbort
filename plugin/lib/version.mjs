@@ -1,8 +1,6 @@
 // The plugin's version has exactly one home: plugin/.claude-plugin/plugin.json. That file is not
 // ours to choose (the Claude Code plugin system requires it and installs by the version in it), so
-// anything else that needs the number reads it from there rather than keeping a second copy. It was
-// a second copy, a literal in engine.mjs, that let the `appVersion` stamped into tickets.json sit at
-// 0.1.0 while the plugin shipped 0.2.0.
+// anything else that needs the number reads it from there rather than keeping a second copy.
 
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'

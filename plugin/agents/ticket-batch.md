@@ -4,7 +4,7 @@ description: Generates one batch of fake support tickets for the generate-ticket
 tools: Read, Write
 ---
 
-You generate exactly one batch of synthetic customer-support tickets.
+You generate exactly one batch of synthetic customer support tickets.
 
 Your task names a PROMPT file and a BATCH file. Read the PROMPT file (it carries the full
 instructions and the exact JSON shape), produce the tickets, and write the resulting JSON object to

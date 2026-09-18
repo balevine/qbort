@@ -4,12 +4,11 @@
 // nothing under `plugin/` imports it.
 //
 // It does go through `lib/ticketFile.mjs` to load, because a viewer that accepts a file the engine
-// would have refused to write is a viewer that disagrees with the format, which is the exact drift
-// that definition exists to prevent.
+// would have refused to write is a viewer that disagrees with the format.
 //
 // Output is bounded by default. A run can hold hundreds of tickets, and neither a terminal
-// scrollback nor an agent's context wants all of them at once, so list mode pages at 50 and thread
-// mode at 5. `--limit 0` opts out.
+// scrollback nor an agent's context wants all of them at once, so list mode paginates at 50 and
+// thread mode at 5. `--limit 0` opts out.
 //
 //   node scripts/view-tickets.mjs [file] [options]
 //

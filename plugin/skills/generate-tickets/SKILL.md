@@ -1,12 +1,12 @@
 ---
 name: generate-tickets
-description: Generate fake customer-support tickets with an LLM, driven by a TICKET_PROMPT.md file plus a short settings Q&A. Deals a distinct scenario to every ticket, then fans generation out to parallel subagents; a deterministic engine owns batching, validation/repair, id assignment, timestamp synthesis, and top-up rounds, writing a tickets.json. Use when the user wants to generate synthetic support tickets / a tickets dataset.
+description: Generate fake customer support tickets with an LLM, driven by a TICKET_PROMPT.md file plus a short settings Q&A. Deals a distinct scenario to every ticket, then fans generation out to parallel subagents; a deterministic engine owns batching, validation/repair, id assignment, timestamp synthesis, and top-up rounds, writing a tickets.json. Use when the user wants to generate synthetic support tickets / a tickets dataset.
 disable-model-invocation: true
 ---
 
 # generate-tickets
 
-Generates a `tickets.json` of fake customer-support tickets. The **ambient Claude model** (via
+Generates a `tickets.json` of fake customer support tickets. The **ambient Claude model** (via
 subagents) produces ticket *content*, and a deterministic Node engine (`engine.mjs`) owns everything
 structural: batching, validation and repair, sequential ids, `isStaff` role, synthesized
 `createdAt` timestamps, per-batch capping, and top-up rounds. Never hand those structural jobs to
@@ -21,9 +21,10 @@ user's working directory.
 The user supplies the creative/distribution half of the prompt as `TICKET_PROMPT.md` in the working
 directory. Check for it (`ls TICKET_PROMPT.md`).
 
-- **If missing:** copy the starter template (`cp "$SKILLDIR/templates/TICKET_PROMPT.md" TICKET_PROMPT.md`),
-  tell the user you created it, and **stop** so they can edit it before generating. Do not proceed to
-  generation on the same turn, because the starter is generic and they'll usually want to tailor it.
+- **If missing:** copy the starter template (`cp "$SKILLDIR/templates/TICKET_PROMPT.md" TICKET_PROMPT.md`)
+  and tell the user you created it, that the starter is generic, and that editing it and running again
+  is how they get tickets about their own product. Then continue: a first run off the starter is a
+  cheap way to see what the whole pipeline produces.
 - **If present:** continue.
 
 ## Step 2: collect settings via Q&A
