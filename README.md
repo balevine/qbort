@@ -1,119 +1,106 @@
 # Qbort
 
-A local-first desktop app that generates realistic, **fake customer-support tickets** with an LLM — driven by a handful of numeric settings and a fully editable prompt. It's useful for seeding demos, load-testing a helpdesk UI, or producing sample data without touching real customer information.
+A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin that generates realistic, **fake customer-support tickets**, driven by a prompt file you write and a handful of numeric settings. It's useful for seeding demos, load-testing a helpdesk UI, or producing sample data without touching real customer information.
 
-Everything runs on your machine. The app only reaches out to the network to make the LLM call itself; generated tickets are written to a plain JSON file you can view in-app and export.
-
-![Qbort screenshot](docs/screenshot.png)
+There's no app to install, no API key, and no `npm install`. Ticket content is written by the Claude you're already talking to (through parallel subagents). A small, dependency-free Node engine owns everything structural (batching, validation and repair, sequential ids, staff/customer roles, and synthesized timestamps) and writes a `tickets.json`.
 
 **Highlights**
 
-- Two providers: **Ollama** (local, default) and **Anthropic**. (OpenAI and Google Gemini support is planned for a future release.)
-- Hosted API keys are stored in your **OS keychain** (via Electron `safeStorage`) — never in plaintext config, never exposed to the UI.
-- A monochrome, neo-brutalist interface with a paginated ticket viewer and per-ticket conversation threads.
-- Output is a self-describing `tickets.json` (tickets + run metadata: token usage, cost, timing).
+- Install as a plugin, invoke with `/qbort:generate-tickets`, answer four questions, get a file.
+- The creative half of the prompt is **yours**: a `TICKET_PROMPT.md` in your working directory describing your product, your categories, and the people who file tickets.
+- Every ticket gets its own one-line scenario off a globally-visible list, so batches can't converge on the same handful of topics.
+- Output is a self-describing `tickets.json` with full conversation threads (`{ id, subject, status, messages: [...] }`).
 
 ---
 
-## Installation
+## Requirements
 
-### Option A — download the released binary (macOS)
+- **Claude Code**: the plugin runs inside it.
+- **Node.js 20+** on your `PATH` (`node --version`). No `npm install`: the engine is dependency-free ESM.
 
-1. Go to the [**Releases**](../../releases) page and download the latest `.dmg`.
-2. Open the `.dmg` and drag **Qbort** into your **Applications** folder.
-3. **First launch (unsigned app):** the app is currently **unsigned**, so macOS blocks it the first time you open it ("Apple cannot check it for malicious software"). The exact steps depend on your macOS version. On **macOS 14 and earlier**, right-click (or Control-click) the app → **Open**, then click **Open** in the confirmation dialog. On **macOS 15 (Sequoia) and later**, double-click the app once (it will be blocked), then open **System Settings → Privacy & Security**, find the "Qbort was blocked" message near the bottom, and click **Open Anyway**. You only need to do this once. Either way, this Terminal command clears the quarantine flag and skips the dialogs entirely:
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/Qbort.app"
-   ```
+## Install
 
-### Option B — build and run from source
-
-Requires **Node.js 20+** and **npm**.
-
-```bash
-git clone https://github.com/balevine/qbort.git
-cd qbort
-npm install
-
-# Run the app in development (hot reload):
-npm run dev
-
-# — or — build a distributable (.dmg + .zip land in release/):
-npm run dist:mac
+```
+/plugin marketplace add balevine/qbort
+/plugin install qbort@qbort
 ```
 
-Handy scripts: `npm test` (unit + integration suite), `npm run typecheck`.
+That registers the `generate-tickets` skill and the restricted `ticket-batch` agent it spawns for each batch.
 
 ---
 
 ## Usage
 
-The app is a single screen: a ticket viewer in the middle, and a top bar with **LOAD TICKETS**, **GENERATE**, and a **gear** (settings) button. All configuration lives behind the gear.
+1. `cd` into the directory where you want the output. The plugin reads and writes there.
+2. Type **`/qbort:generate-tickets`**.
 
-### Choose and configure a provider
+Asking in natural language ("generate some fake support tickets") does **not** trigger it. The skill sets `disable-model-invocation: true`, which keeps its description out of every session's startup context at the cost of only firing when you name it.
 
-Open **Settings → Provider**. The default provider is **Ollama** so the app works out of the box with no API key.
+### The prompt file
 
-#### Ollama (local)
+The first run scaffolds a starter **`TICKET_PROMPT.md`** into your working directory and stops, so you can edit it before spending a run. This file is the creative and distribution half of the prompt: what your product is, who files tickets about it, the categories and roughly what share of tickets each should get, the tone, and anything else that shapes the content.
 
-1. Make sure your Ollama server is running (default host `http://localhost:11434`).
-2. In the Provider panel, confirm the host and click **Fetch models**, then pick an installed model from the dropdown.
+The engine appends its own output requirements below a clear delimiter: the exact JSON shape, the per-batch count, the allowed statuses, the staff roster, and the per-ticket reply targets. Your text is never overridden. Every compiled prompt is a plain file at `.qbort-run/prompt-<round>-<batch>.txt` if you want to read exactly what a subagent was sent.
 
-That's it — local generation is free and never leaves your machine. (Managing/installing Ollama models themselves is outside the scope of this app.)
-
-#### Anthropic
-
-1. Select **Anthropic** as the provider.
-2. Paste your API key and click **Save**. The key is encrypted into your OS keychain; the app only ever shows whether a key is *set*, never the value. Use **Test connection** to verify it.
-3. **You do not pick a model.** For hosted providers the app automatically uses a curated, cost-balanced mid-tier model — for Anthropic, this is **Claude Sonnet 5**, used by default and **not user-changeable**. Synthetic ticket generation is high-volume and doesn't need a flagship reasoning model, so the choice is fixed to keep runs fast and cheap.
-
-### Settings
-
-Open **Settings** (gear icon). The generation settings are:
+### The settings Q&A
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
 | **Number of tickets** | 100 | 1 – 500 | How many tickets to generate in a run. |
-| **Include staff responses** | off | — | When off, each ticket has only the customer's opening message. |
-| **Average staff responses** | 0 | 0 – 20 | Mean replies per ticket; the actual count varies around this. |
+| **Include staff responses** | off | n/a | When off, each ticket has only the customer's opening message. |
+| **Average staff responses** | 0 | 0 – 20 | Mean replies per ticket; the actual count is a Poisson draw around it. |
 | **Number of staff members** | 10 | 1 – 100 | Size of the staff roster used to author replies. |
-| **Max ticket age (days)** | 90 | 1 – 3650 | How far back message timestamps are spread — each ticket opens somewhere in this window, with replies following later. |
+| **Max ticket age (days)** | 90 | 1 – 3650 | How far back ticket open times are spread. Each ticket opens somewhere in this window, with replies following later. |
 
-**Staff roster.** A staff member is a `name` + `alias`; their email is derived as `alias@company.biz`. The app ships with a default roster and resizes it as you change the staff count. This roster is the source of truth for who authors staff replies, and the `@company.biz` domain is how the viewer tells staff apart from customers.
+Every answer, including a free-typed one, is re-clamped into range before it reaches the engine, so an out-of-range value is impossible rather than merely discouraged.
 
-**Default folder.** Under **Settings → Storage** you can pick the folder where ticket files are saved and auto-loaded from. If unset, it defaults to the app's user-data directory.
+**Staff roster.** The roster is generated from the count you give: each member is a `Firstname Lastname` with a derived `firstname.lastname@company.biz` email. That fixed domain is how staff messages are told apart from customer ones. Custom names aren't collected.
 
-### Saving settings
+### What happens during a run
 
-There is **no save button** — settings persist automatically as you change them (written to a `settings.json` in the app's user-data directory). Just close the modal when you're done.
+The run opens with a single call that writes a list of one-line ticket scenarios (about 30% more than you asked for), which is then shuffled and dealt one per ticket. Then batches fan out in parallel, each written by its own subagent, and the engine validates, repairs, and assembles what comes back into `.qbort-run/tickets.json`. If validation drops tickets, up to 3 top-up rounds regenerate just the shortfall, drawing fresh scenarios from the surplus.
 
-### Modifying the prompt
+`.qbort-run/` is scratch: run state, the per-batch prompts, the raw subagent output, and the final file. Add it to your `.gitignore` if you don't want it tracked.
 
-**This is where the generator is most customizable.** Under **Settings → Prompt** you'll find a large editor holding the creative half of the prompt: ticket categories and their percentages, sentiment mix, tone, product/domain context — whatever shapes the tickets you want. It ships with a minimal starter prompt that you expand on based on what you need.
+**Why a run is capped at 500 tickets.** Batches are written by separate subagents that can't see each other. Left alone, they converge on the same obvious topics and produce near-duplicate tickets, which is what the scenario list prevents. That list has to come back in a single response, and much past 500 one-liners a single response stops being reliable, so a short list fails the run rather than quietly producing duplicates at full cost. If you need more than 500, do several runs: each gets its own independent scenario list.
 
-At generation time the app **compiles** the final prompt: your text, followed by a clearly delimited block of app-enforced requirements (the exact JSON schema, how many tickets this batch should produce, the allowed status values, and the staff-response rules). Your text is never silently overridden — the requirements are *appended*. Use **Preview compiled prompt** to see exactly what gets sent to the model.
+---
 
-### Generating tickets
+## What you get
 
-1. Click **GENERATE** in the top bar.
-2. You'll see a **cost estimate** first — estimated tokens and cost (Ollama shows `$0 · local`). Nothing runs until you confirm.
-3. Confirm to start. The run opens by generating a list of one-line ticket scenarios, then fans out into parallel batches. Progress streams live (tickets done, batches, retries) and you can **Cancel** at any time — tickets produced so far are still saved.
-4. When the run finishes, the tickets are written to `tickets.json` in your default folder and loaded into the viewer. The file also records the run's real token usage, cost, and duration.
+`.qbort-run/tickets.json`, shaped like this:
 
-**Why a run is capped at 500 tickets.** Tickets are generated in parallel batches, and each batch is written by a separate model call that can't see the others. Left alone, those calls converge on the same handful of obvious topics and different batches produce near-duplicate tickets. So before any batch runs, the app makes one call that writes a list of one-line scenarios — a few more than the run needs — and deals one to each ticket, which is what keeps batches from overlapping. That list has to come back in a single response, and past roughly 500 tickets it no longer fits in the model's output limit. If you need more than 500, do several runs: each gets its own independent scenario list.
+```jsonc
+{
+  "meta": {
+    "generatedAt": "2026-06-30T12:00:00.000Z",
+    "provider": "claude-skill",
+    "model": "Claude Code subagents",
+    "requestedCount": 100,
+    "generatedCount": 98,
+    "rounds": 2
+  },
+  "tickets": [
+    {
+      "id": 1,
+      "subject": "Can't log in after password reset",
+      "status": "open",
+      "messages": [
+        { "from": { "name": "Sarah Kim", "email": "sarah.kim@fake.techcorp.com" },
+          "body": "...", "isStaff": false, "createdAt": "2026-06-28T09:14:00.000Z" },
+        { "from": { "name": "Avery Adams", "email": "avery.adams@company.biz" },
+          "body": "...", "isStaff": true, "createdAt": "2026-06-28T15:42:00.000Z" }
+      ]
+    }
+  ]
+}
+```
 
-### Loading existing tickets
+Every message in a ticket, including the customer's opening one, lives in a single ordered `messages[]` array, oldest first. The engine assigns the `id` (sequential integer), `isStaff` (staff = the `@company.biz` domain; the opener is always the customer), and `createdAt` (ascending by id, strictly increasing within a ticket, never in the future). `status` is one of `new`, `open`, `pending`, `on-hold`, `solved`, `closed`. The model is never trusted with any of that.
 
-Click **LOAD TICKETS** in the top bar to open any tickets JSON file. On launch, the app also auto-loads the most recent file from your default folder, so your last run is there waiting.
+There's no token or cost breakdown (`meta.usage` is absent), because ambient generation isn't a metered API call and produces no token or cost numbers. The block is optional in the format, so a file without it is still valid.
 
-### Viewing tickets
-
-The viewer is a paginated table (100 per page) with columns for **id**, **subject**, **status**, **from**, and **created** (the ticket's opening time). You can:
-
-- **Filter** by status and **search** free-text across the subject and every message's body and author.
-- Click any row to open the **conversation modal** — the full thread rendered as messages (each with its author and timestamp), customer messages on white and staff messages on slate-grey.
-- Read the **summary** at the top: counts by status, total tickets, provider/model, and the token and cost breakdown for the loaded file.
-- **Export** the loaded file anywhere via the native save dialog.
+The file is just JSON, so `jq` it, load it into your own fixtures, or open it in a viewer that reads the format.
 
 ---
 
@@ -123,7 +110,9 @@ Contributions are welcome, but please note:
 
 > **Open an Issue before opening a Pull Request.** Discuss the bug or feature in a GitHub Issue first so we can agree on the approach. **PRs without an associated Issue will be closed without review.**
 
-To work on the project locally, see [Build and run from source](#option-b--build-and-run-from-source). Before submitting, please make sure `npm run typecheck` and `npm test` pass.
+To work on the plugin locally, clone the repo, `npm install` (dev dependencies only, vitest and typescript), and add the checkout as a local marketplace: `/plugin marketplace add ~/projects/qbort` then `/plugin install qbort@qbort`. The skill deliberately lives in `plugin/skills/`, not `.claude/skills/`, so a checkout doesn't shadow the installed copy. `AGENTS.md` has the development loop and the behavior rules worth knowing before you change anything. Before submitting, please make sure `npm run typecheck` and `npm test` pass.
+
+**Previously a desktop app.** Qbort used to be a local-first Electron app with Anthropic and Ollama providers, keychain-stored API keys, and a built-in viewer. That app has been removed and there are no more `.dmg` releases. The `tickets.json` format is unchanged, so files generated by the old app still load anywhere they did before.
 
 ---
 

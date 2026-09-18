@@ -8,5 +8,5 @@ release/
 coverage/
 *.tsbuildinfo
 .notes
-.plans/ideas/
+.plans/
 .qbort-run/
