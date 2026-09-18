@@ -1,0 +1,15 @@
+{
+  "name": "qbort",
+  "displayName": "Qbort",
+  "version": "0.2.0",
+  "description": "Generate fake customer support tickets with Claude using a prompt file and a brief Q&A.",
+  "author": {
+    "name": "Brian Levine",
+    "email": "brian@balevine.com",
+    "url": "https://github.com/balevine"
+  },
+  "homepage": "https://github.com/balevine/qbort",
+  "repository": "https://github.com/balevine/qbort",
+  "license": "MIT",
+  "keywords": ["tickets", "support", "synthetic-data", "generation"]
+}

@@ -1,46 +1,77 @@
 # AGENTS.md
 
-Guidance for agentic coding tools working in this repo. Keep changes consistent with what's here. The authoritative spec is `.plans/PROJECT_SPEC.md` — read it for detail and **keep it in sync when behavior changes**.
+Guidance for agentic coding tools working in this repo. Keep changes consistent with what's here.
+
+`README.md` is the canonical description of how the plugin behaves. When behavior changes, that is the file to update, along with this one and the skill's own README for anything they cover.
+
+`.plans/` is gitignored and local-only and is not a source of truth for the state of the codebase.
 
 ## What this is
 
-A local-first **Electron desktop app** that generates fake customer-support tickets with an LLM, driven by numeric settings + an editable prompt. Runs entirely locally; only network egress is the LLM call. Output is a `tickets.json` the user views in-app and exports. Providers: **Ollama** (local, default) and **Anthropic** — those two only (OpenAI/Gemini are deferred to later).
+A **Claude Code plugin** that generates fake customer support tickets. The user supplies a `TICKET_PROMPT.md` file and answers a short settings Q&A. The ambient Claude model (via parallel subagents) writes ticket content. A deterministic, dependency-free Node engine owns everything structural and writes a `tickets.json` output file. The only product is the JSON file.
 
-## Structure & process boundary
+## Structure & the engine/model boundary
 
-- `src/main/` — Electron **main process**. The only place with Node/OS/network/key access. Key files: `index.ts` (BrowserWindow + CSP), `ipc.ts` (typed handlers), `secrets.ts` (safeStorage), `settings.ts`, `storage.ts`, `fsUtil.ts` (`atomicWriteJson`/`readJson`), `connection.ts`, `generation/` (orchestrator, service, estimate, validate) + `generation/providers/` (adapters).
-- `src/preload/index.ts` — `contextBridge` exposing the typed `window.api`. Nothing else reaches the renderer.
-- `src/shared/` — cross-process pure logic + the **IPC contract**: `types.ts` (single source of truth for data model + `IpcApi`/`IpcChannels`), `settings.ts`, `staff.ts`, `promptCompiler.ts`, `time.ts`, `generation.ts`, `readiness.ts`.
-- `src/renderer/` — React UI: `App.tsx` shell, `components/` (`ui/` primitives + feature components), `state/` (contexts via `createSafeContext`), `lib/` (utils, format, hooks).
+- `plugin/lib/*.mjs`: **the logic**, one copy, dependency-free ESM on bare `node`. `args`, `constants`, `fsUtil` (`atomicWriteJson`/`atomicWriteText`/`readJson`/`readText`), `paths` (the two directory names + the timestamped output filename), `promptCompiler`, `scratch` (`clearScratch`), `settings` (`LIMITS`/`clampGeneration`), `staff` (roster + Poisson sampler), `ticketFile` (the `tickets.json` format), `time`, `types` (JSDoc typedefs), `validate` (repair/drop + id/role/timestamp assignment), `version` (reads the plugin manifest).
+- `plugin/skills/generate-tickets/engine.mjs`: the CLI (`plan | batches | topup | assemble`). **Orchestration only.**
+- `plugin/skills/generate-tickets/SKILL.md`: instructions Claude follows. The only thing that can spawn a subagent, which is the only way a model gets called.
+- `plugin/agents/ticket-batch.md`: the restricted (`Read`/`Write` only) batch agent, registered namespaced as `qbort:ticket-batch`.
+- `test/`: vitest, in TypeScript, importing `plugin/lib` through the `@lib/*` alias.
+- `scripts/`: repo-local dev tools, outside the shipped plugin. `view-tickets.mjs` reads a tickets file in the terminal (list, thread, filter, `--stats`), defaulting to the newest run in `qbort-output/` and loading it through `lib/ticketFile.mjs` so the viewer and the writer agree on the format. Nothing under `plugin/` imports it.
 
-**Hard rule:** the renderer never touches Node, the network, or API keys. Everything crosses the boundary through the allow-listed IPC surface (declared in `shared/types.ts`, implemented in `main/ipc.ts`, bridged in `preload`). API keys are decrypted in main only and **never** returned to the renderer (renderer learns only "is a key set").
+**Hard rule:** the engine owns structure, the model owns content. `id` (sequential int), `isStaff` (from the `@company.biz` domain, opener always the customer), and `createdAt` (synthesized, ascending by id, strictly increasing within a ticket) are assigned by the engine and never trusted from the model. Ticket shape: `{ id, subject, status, messages: [{ from, body, isStaff, createdAt }] }` (opening message is `messages[0]`). That shape is frozen, so files from older runs still load in the viewers that read them. The engine never touches the network and has no credentials.
+
+**Second hard rule:** policy lives in `lib/`. If code decides a value (a bound, a shape, a repair rule, an output filename), it belongs in a `lib/` function that tests can call directly. `engine.mjs` should only call those functions, read and write files, and set exit codes.
 
 ## Generation pipeline
 
-`GenerationService.start` → `runGeneration` (orchestrator) splits into concurrent batches → per batch: `compilePromptParts` → `provider.generateBatch` (raw `fetch`, no SDKs) → `validateTickets` (zod, repair/drop) → `assembleTickets` → coalesced atomic write.
+`plan` (wipe the scratch, clamp settings, generate roster, draw opening times, compile the static prefix, stamp the output filename, emit the scenario prompt) → one subagent writes `scenarios.json` → `batches` (validate + shuffle the list, deal one scenario per ticket, compile per-batch prompts) → fan out one `qbort:ticket-batch` subagent per batch, all in a single message → `assemble` (`validateTickets` → cap → `assembleTickets` → validate our own file through `parseTicketFile` → atomic write) → `topup` + `assemble` again while short, up to 3 extra rounds.
 
-**The app owns structural fields; the LLM owns content.** `id` (sequential int), `isStaff` (from `@company.biz` domain), and `createdAt` (synthesized, ascending, ordered by id) are assigned by the app — never trusted from the model. Ticket shape: `{ id, subject, status, messages: [{ from, body, isStaff, createdAt }] }` (opening message is `messages[0]`).
+The scenario pass exists because batch prompts are otherwise byte-identical and independent batches converge on the same topics. A missing or short scenario list **fails the run** (`batches` exits non-zero) rather than producing duplicate-heavy tickets at full cost; a reserve that runs dry mid-top-up does not, because most of the output already exists by then.
+
+**Two directories, neither configurable.** `.qbort-run/` is scratch and `qbort-output/` is the product, both hardcoded relative to the working directory (`lib/paths.mjs`). There is no `--out`: the engine takes no path from its caller, which is what makes `plan`'s unconditional wipe of `.qbort-run/` safe. The wipe is the point of the split. Batch files sit at fixed names that *subagents*, not the engine, are expected to write, and the engine has no way to tell a leftover `batch-0-0.json` from a previous run apart from one a subagent just wrote, so without the wipe it would be assembled into the new output silently. Output filenames are timestamped (`tickets-YYYYMMDD-HHMMSS.json`) and **stamped once, at `plan`**, then carried in `run-context.json`. `assemble` runs again after every top-up round, so naming the file at write time would leave a run that needed two top-ups with three files, all looking finished and only the last complete.
+
+Every engine write is atomic, and every named failure has an exit code `SKILL.md` can branch on (`MISSING_PROMPT`, `NO_CONTEXT`, `NO_SCENARIOS`, `BAD_SCENARIOS`, `SHORT_SCENARIOS`, `BAD_ROUND`, `NO_ROUND` → 2; `BAD_OUTPUT` → 3).
+
+**The version has one home:** `plugin/.claude-plugin/plugin.json`. The plugin system requires that file and installs by the version in it, so anything else that needs the number reads it through `lib/version.mjs`, never a literal. `package.json` is the test harness and is `private` with no version at all.
 
 ## Code style
 
-- TypeScript strict; `noUnusedLocals` is on — no dead vars/imports. Path aliases `@shared/*` and `@/*`.
+- `plugin/` is **zero-dependency ESM on bare `node` (20+)**. No npm imports, no build step, no post-20 APIs (`toSorted`, `Object.groupBy`, `globSync`, and friends).
+- Types are **JSDoc** on the exported `lib/` signatures, with the data model itself in `lib/types.mjs`. `checkJs` stays off, so a wrong annotation degrades to `any` silently rather than erroring. Keep them correct by hand.
 - **camelCase** everywhere (data model + code).
-- Every module in `shared/` and `main/` ships a colocated `*.test.ts` (**Vitest**). Tests are deterministic: no real network (providers mocked), `safeStorage` faked, and `rng`/`now`/`sleep` are injectable — keep them that way.
-- Prefer pure, testable helpers; keep side effects (fs, fetch, Electron) at the edges. Writes go through `fsUtil.atomicWriteJson`.
+- Tests are **Vitest**, and they all live in `test/` (nothing under `plugin/`, which would drag vitest and typescript into an installed plugin). They point at the shipped `plugin/lib/*.mjs` through the `@lib/*` alias, so the tested code is the code that ships. Tests are deterministic: `rng`/`now` are injectable, and the engine tests run the real CLI over `child_process` with hand-written files standing in for subagents. Keep them that way.
+- TypeScript strict in `test/`. `noUnusedLocals` is on, so no dead vars/imports.
+- Prefer pure, testable helpers; keep side effects (fs, process) at the edges. Writes go through `fsUtil`.
 - Comments explain **why**, not what; match the surrounding density.
 - When writing comments and markdown files, prefer periods and parenthesis over semi-colons and em-dashes.
 
-## Visual design
+## Development loop (the plugin)
 
-Neo-brutalist, strictly **monochrome** black/white/grays, minimal, high-contrast. Tokens in `tailwind.config.cjs`: `ink` (black), `paper` (white); the only permitted non-monochrome surface is `staff` (slate) for staff messages. Hard **2px black borders**, **square corners** (`rounded-none`), solid offset shadows (`shadow-brutal`), flat fills (no gradients), **UPPERCASE mono** buttons/labels. shadcn/Radix primitives are restyled to this language in `components/ui/`. Status is conveyed by borders/weight/labels, not color.
+The skill lives in `plugin/skills/generate-tickets/`, **not** in `.claude/skills/`, so Claude Code does not discover it from the working tree. It is picked up only through a plugin install, and the repo root is its own marketplace (`.claude-plugin/marketplace.json` pointing at `./plugin`). To work on it here:
+
+```
+/plugin marketplace add <path/to/qbort>   # a real path to the repo root, not `.`
+/plugin install qbort@qbort
+```
+
+The plugin's agent registers **namespaced**, as `qbort:ticket-batch`, not as the bare `name:` in its frontmatter. `SKILL.md` spawns it by that name, so a rename of the plugin renames the agent type too.
+
+Then invoke it as `/qbort:generate-tickets`. The install resolves `${CLAUDE_PLUGIN_ROOT}` to the plugin directory, which is how `SKILL.md` finds `engine.mjs` and `templates/` wherever it is installed. Never hardcode a path back to this repo.
+
+**The install is a copy, not a symlink.** Even from a local directory marketplace, `/plugin install` snapshots `plugin/` into `~/.claude/plugins/cache/qbort/qbort/<version>/`, and `${CLAUDE_PLUGIN_ROOT}` points at that snapshot. **No** working-tree edit reaches an installed plugin on its own, not `SKILL.md`, not the manifests, not `agents/`, and not `engine.mjs` or `lib/` either. After editing anything under `plugin/`, re-run `/plugin marketplace update qbort`, reinstall, and **restart the session**. Check `~/.claude/plugins/cache/qbort/qbort/<version>/` against `plugin/` when a run behaves like older code (it probably is older code).
+
+The engine itself needs none of this. It is plain `node` with no dependencies, so the fastest loop for engine work is running its subcommands directly in a temp dir (`node plugin/skills/generate-tickets/engine.mjs plan --prompt TICKET_PROMPT.md --count 6`), which is also what the tests do. Run it from a scratch directory, not the repo root: it reads and writes `.qbort-run/` and `qbort-output/` in whatever directory it is invoked from, and `plan` wipes the first of them.
 
 ## Commands
 
-`npm run dev` · `npm run typecheck` · `npm test` · `npm run build` · `npm run pack:dir` (unpacked smoke) · `npm run dist:mac` (universal `.dmg`/`.zip`). Run `typecheck` + `test` before considering a change done.
+`npm test` · `npm run test:watch` · `npm run typecheck`. There is no build, no dev server, and no packaging step, because the plugin ships the sources it runs. Run `typecheck` + `test` before considering a change done.
+
+To read a run's output without leaving the terminal: `node scripts/view-tickets.mjs --stats`, then `--id 7` for a thread or `--page 2` for the next page of the list. `--help` prints the flags. It defaults to the newest file in `qbort-output/` (pass a path for an older run) and paginates by default, so pointing it at a several-hundred-ticket run is safe.
 
 ## Notes
 
-- Packaging is **unsigned**, manual-update, via GitHub Releases (`electron-builder.yml`, `.github/workflows/release.yml`).
-- Model IDs/pricing live in `providers/models.ts` (unverified placeholders — see §14 of the spec).
-- `README.md` is user-facing; paragraphs are single-line (soft-wrap) — match that. `.notes/` is gitignored scratch.
+- A run touches exactly two directories in the working directory, both gitignored: `.qbort-run/` (scratch, wiped at the start of every run) and `qbort-output/` (the timestamped tickets files, never wiped). Don't add a third, and don't move anything across the line between them.
+- `README.md` is user-facing, and its paragraphs are single-line (soft-wrap). Match that. `plugin/skills/generate-tickets/README.md` is the skill's own human docs and follows the same rule. `.notes/` is gitignored scratch.
+- CI (`.github/workflows/ci.yml`) is typecheck + test on Node 20. No build job.
 - Contribution rule: open an Issue before a PR.

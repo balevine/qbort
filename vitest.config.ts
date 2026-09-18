@@ -4,12 +4,13 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'test/**/*.test.ts']
+    include: ['test/**/*.test.ts'],
+    // The engine tests spawn `node` per subcommand, so they are slower than the unit tests.
+    testTimeout: 20_000
   },
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src/renderer/src'),
-      '@shared': resolve(__dirname, 'src/shared')
+      '@lib': resolve(__dirname, 'plugin/lib')
     }
   }
 })
