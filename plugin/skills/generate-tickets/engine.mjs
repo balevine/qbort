@@ -5,21 +5,22 @@
 // left to the ambient Claude subagents is producing ticket *content* (see SKILL.md).
 //
 // Subcommands:
-//   plan     --prompt <file> --out <dir> --count N [--staff] [--avg A] [--staff-members M]
+//   plan     --prompt <file> --count N [--staff] [--avg A] [--staff-members M]
 //            [--age-days D] [--batch-size B]
-//   batches  --out <dir>
-//   topup    --out <dir> --round R
-//   assemble --out <dir> --round R
+//   batches
+//   topup    --round R
+//   assemble --round R
 //
 // `plan` and `batches` are separate because a scenario list has to be generated in between, and in
 // the skill an LLM call is a subagent spawn that only SKILL.md can make. `plan` writes
-// <out>/scenario-prompt.txt, a subagent answers into <out>/scenarios.json, and `batches` deals one
-// scenario per ticket into the batch prompts so independent batches cannot converge on the same
-// topics.
+// scenario-prompt.txt, a subagent answers into scenarios.json, and `batches` deals one scenario per
+// ticket into the batch prompts so independent batches cannot converge on the same topics.
 //
-// State lives in <out>/run-context.json; each round's batch manifest in <out>/round-<r>.json;
-// each batch's compiled prompt in <out>/prompt-<r>-<i>.txt and the subagent's raw output in
-// <out>/batch-<r>-<i>.json. The finished file is written to <out>/tickets.json.
+// Two directories, both relative to the working directory and neither of them configurable (see
+// ../../lib/paths.mjs). .qbort-run/ is scratch, wiped at the start of every `plan`: run state in
+// run-context.json, each round's batch manifest in round-<r>.json, each batch's compiled prompt in
+// prompt-<r>-<i>.txt and the subagent's raw output in batch-<r>-<i>.json. qbort-output/ holds the
+// product, one timestamped tickets file per run, and is never wiped.
 //
 // This file is orchestration only. Everything it decides lives in ../../lib/, which is the single
 // copy of that logic and the code the test suite points at.
@@ -35,7 +36,13 @@ import { compilePromptParts, compileScenarioPrompt, scenarioTarget } from '../..
 import { validateTickets, assembleTickets } from '../../lib/validate.mjs'
 import { parseTicketFile } from '../../lib/ticketFile.mjs'
 import { DEFAULT_BATCH_SIZE } from '../../lib/constants.mjs'
+import { OUTPUT_DIR, SCRATCH_DIR, outputFileName } from '../../lib/paths.mjs'
+import { clearScratch } from '../../lib/scratch.mjs'
 import { pluginVersion } from '../../lib/version.mjs'
+
+/** Every subcommand works out of the same two directories. No caller ever supplies a path. */
+const scratchDir = resolve(SCRATCH_DIR)
+const outputDir = resolve(OUTPUT_DIR)
 
 function splitBatches(count, batchSize) {
   const specs = []
@@ -58,7 +65,7 @@ function shuffled(list, rng = Math.random) {
 // Compile prompt files for a round and write its manifest. Shared by `batches` and `topup`.
 // Deals scenarios off the context's list, advancing `scenarioCursor` as batches are built. A round
 // that outruns the reserve simply gets fewer scenarios than tickets (see cmdTopup).
-async function buildRound(ctx, outDir, round, count) {
+async function buildRound(ctx, round, count) {
   const gen = ctx.settings
   if (typeof ctx.scenarioCursor !== 'number') ctx.scenarioCursor = 0
   const specs = splitBatches(count, ctx.batchSize)
@@ -80,13 +87,13 @@ async function buildRound(ctx, outDir, round, count) {
         responseCounts
       }
     })
-    const promptFile = resolve(join(outDir, `prompt-${round}-${index}.txt`))
-    const batchFile = resolve(join(outDir, `batch-${round}-${index}.json`))
+    const promptFile = join(scratchDir, `prompt-${round}-${index}.txt`)
+    const batchFile = join(scratchDir, `batch-${round}-${index}.json`)
     await atomicWriteText(promptFile, `${ctx.staticPrefix}\n\n${dynamic}\n`)
     batches.push({ index, count: batchCount, promptFile, batchFile })
   }
   const manifest = { round, batches }
-  await atomicWriteJson(join(outDir, `round-${round}.json`), manifest)
+  await atomicWriteJson(join(scratchDir, `round-${round}.json`), manifest)
   return manifest
 }
 
@@ -100,7 +107,10 @@ function printRound(manifest) {
 
 // ── plan ────────────────────────────────────────────────────────────────────
 async function cmdPlan(args) {
-  const outDir = resolve(args.out || '.qbort-run')
+  // Before anything else, including reading the prompt: whatever is in the scratch belongs to some
+  // earlier run, and the paths a subagent writes to are fixed, so anything left behind would be
+  // picked up by this run's `assemble` as if the subagent had just written it.
+  await clearScratch(scratchDir)
 
   const promptPath = resolve(args.prompt || 'TICKET_PROMPT.md')
   const prompt = await readText(promptPath)
@@ -139,6 +149,9 @@ async function cmdPlan(args) {
   const ctx = {
     version: 1,
     nowMs,
+    // Stamped here and nowhere else. `assemble` runs again after every top-up round and rewrites
+    // this same file, so naming it at write time would scatter a run across several files.
+    outputFile: outputFileName(new Date(nowMs)),
     batchSize,
     prompt,
     settings,
@@ -153,35 +166,35 @@ async function cmdPlan(args) {
     scenarioCursor: 0,
     tickets: []
   }
-  await atomicWriteJson(join(outDir, 'run-context.json'), ctx)
+  await atomicWriteJson(join(scratchDir, 'run-context.json'), ctx)
 
-  const scenarioPromptFile = resolve(join(outDir, 'scenario-prompt.txt'))
-  const scenariosFile = resolve(join(outDir, 'scenarios.json'))
+  const scenarioPromptFile = join(scratchDir, 'scenario-prompt.txt')
+  const scenariosFile = join(scratchDir, 'scenarios.json')
   await atomicWriteText(scenarioPromptFile, `${compileScenarioPrompt(prompt, ctx.scenarioCount)}\n`)
 
   console.log(`PLANNED ${settings.numTickets} ticket(s), batchSize=${batchSize}, staff=${settings.includeStaffResponses}, roster=${roster.length}`)
-  console.log(`OUT ${outDir}`)
+  console.log(`SCRATCH ${scratchDir} (cleared)`)
+  console.log(`WILL WRITE ${join(outputDir, ctx.outputFile)}`)
   console.log(`SCENARIO ${ctx.scenarioCount} scenario(s) needed. Spawn ONE subagent that reads its PROMPT file and writes its OUT file:`)
   console.log(`  PROMPT=${scenarioPromptFile} OUT=${scenariosFile}`)
-  console.log('Then run: engine.mjs batches --out <dir>')
+  console.log('Then run: engine.mjs batches')
 }
 
 // ── batches ─────────────────────────────────────────────────────────────────
 // Reads the scenario list the subagent produced, shuffles it, and builds round 0.
 // Shuffling matters: the model emits the list grouped by whatever categories the prompt implies, so
 // dealing it in order would cluster categories per batch and leave the reserve as one category.
-async function cmdBatches(args) {
-  const outDir = resolve(args.out || '.qbort-run')
-  const ctx = await readJson(join(outDir, 'run-context.json'))
+async function cmdBatches() {
+  const ctx = await readJson(join(scratchDir, 'run-context.json'))
   if (!ctx) {
     console.error('NO_CONTEXT run plan first')
     process.exit(2)
   }
 
-  const scenariosPath = join(outDir, 'scenarios.json')
+  const scenariosPath = join(scratchDir, 'scenarios.json')
   const raw = await readText(scenariosPath)
   if (raw === null) {
-    console.error(`NO_SCENARIOS ${resolve(scenariosPath)} not found (the scenario subagent must write it before running batches)`)
+    console.error(`NO_SCENARIOS ${scenariosPath} not found (the scenario subagent must write it before running batches)`)
     process.exit(2)
   }
   // Lenient like validateTickets: tolerate fences or stray prose around the JSON object.
@@ -201,7 +214,7 @@ async function cmdBatches(args) {
   }
   const list = Array.isArray(parsed) ? parsed : parsed?.scenarios
   if (!Array.isArray(list)) {
-    console.error(`BAD_SCENARIOS ${resolve(scenariosPath)} is not a JSON object of shape { "scenarios": [...] }`)
+    console.error(`BAD_SCENARIOS ${scenariosPath} is not a JSON object of shape { "scenarios": [...] }`)
     process.exit(2)
   }
   const cleaned = list.filter((s) => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim())
@@ -213,8 +226,8 @@ async function cmdBatches(args) {
 
   ctx.scenarios = shuffled(cleaned)
   ctx.scenarioCursor = 0
-  const manifest = await buildRound(ctx, outDir, 0, needed)
-  await atomicWriteJson(join(outDir, 'run-context.json'), ctx)
+  const manifest = await buildRound(ctx, 0, needed)
+  await atomicWriteJson(join(scratchDir, 'run-context.json'), ctx)
 
   console.log(`SCENARIOS ${ctx.scenarios.length} loaded (${ctx.scenarios.length - needed} held in reserve for top-ups)`)
   printRound(manifest)
@@ -222,8 +235,7 @@ async function cmdBatches(args) {
 
 // ── topup ─────────────────────────────────────────────────────────────────────
 async function cmdTopup(args) {
-  const outDir = resolve(args.out || '.qbort-run')
-  const ctx = await readJson(join(outDir, 'run-context.json'))
+  const ctx = await readJson(join(scratchDir, 'run-context.json'))
   if (!ctx) {
     console.error('NO_CONTEXT run plan first')
     process.exit(2)
@@ -243,22 +255,21 @@ async function cmdTopup(args) {
   // scenario rather than failing the run. Most of the output already exists at this point, so
   // fail-fast (the rule for the initial scenario call) would be the wrong trade.
   const reserve = Math.max(0, (ctx.scenarios?.length ?? 0) - ctx.scenarioCursor)
-  const manifest = await buildRound(ctx, outDir, round, shortfall)
-  await atomicWriteJson(join(outDir, 'run-context.json'), ctx)
+  const manifest = await buildRound(ctx, round, shortfall)
+  await atomicWriteJson(join(scratchDir, 'run-context.json'), ctx)
   console.log(`TOPUP round ${round}: shortfall=${shortfall}, scenarios available=${Math.min(reserve, shortfall)}`)
   printRound(manifest)
 }
 
 // ── assemble ────────────────────────────────────────────────────────────────
 async function cmdAssemble(args) {
-  const outDir = resolve(args.out || '.qbort-run')
-  const ctx = await readJson(join(outDir, 'run-context.json'))
+  const ctx = await readJson(join(scratchDir, 'run-context.json'))
   if (!ctx) {
     console.error('NO_CONTEXT run plan first')
     process.exit(2)
   }
   const round = Number(args.round)
-  const manifest = await readJson(join(outDir, `round-${round}.json`))
+  const manifest = await readJson(join(scratchDir, `round-${round}.json`))
   if (!manifest) {
     console.error(`NO_ROUND round-${round}.json not found`)
     process.exit(2)
@@ -291,7 +302,7 @@ async function cmdAssemble(args) {
   }
 
   ctx.generatedCount = kept.length
-  await atomicWriteJson(join(outDir, 'run-context.json'), ctx)
+  await atomicWriteJson(join(scratchDir, 'run-context.json'), ctx)
 
   const file = {
     meta: {
@@ -319,13 +330,15 @@ async function cmdAssemble(args) {
     console.error('BAD_OUTPUT assembled file does not match the tickets.json schema. Nothing was written.')
     process.exit(3)
   }
-  const ticketsPath = join(outDir, 'tickets.json')
+  // The name was fixed at `plan`, so every round of this run rewrites one file. atomicWriteJson
+  // creates qbort-output/ on the way through.
+  const ticketsPath = join(outputDir, ctx.outputFile)
   await atomicWriteJson(ticketsPath, file)
 
   const shortfall = total - kept.length
   console.log(`ASSEMBLED round ${round}: +${roundKept} this round`)
   console.log(`KEPT ${kept.length} REQUESTED ${total} DROPPED ${ctx.dropped} SHORTFALL ${shortfall}`)
-  console.log(`FILE ${resolve(ticketsPath)}`)
+  console.log(`FILE ${ticketsPath}`)
 }
 
 // ── dispatch ──────────────────────────────────────────────────────────────────
@@ -337,7 +350,7 @@ switch (cmd) {
     await cmdPlan(args)
     break
   case 'batches':
-    await cmdBatches(args)
+    await cmdBatches()
     break
   case 'topup':
     await cmdTopup(args)

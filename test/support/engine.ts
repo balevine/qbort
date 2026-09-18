@@ -53,17 +53,24 @@ export async function runEngine(args: string[], cwd: string): Promise<EngineResu
 export interface Run {
   /** Working directory the engine is invoked from. */
   dir: string
-  /** The `--out` directory (absolute). */
+  /**
+   * Where the engine will put its scratch. Both directories are hardcoded relative to the working
+   * directory, so these are predictions about the engine, not instructions to it.
+   */
   out: string
+  /** Where the engine will put the finished tickets file. */
+  output: string
   /** The `--prompt` file (absolute). */
   promptFile: string
 }
 
 export async function newRun(): Promise<Run> {
-  const dir = await fs.mkdtemp(join(tmpdir(), 'qbort-engine-'))
+  // realpath, because on macOS `tmpdir()` is a symlink (/tmp → /private/tmp) and the engine prints
+  // paths resolved against the cwd the OS hands it, which is the real one.
+  const dir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'qbort-engine-')))
   const promptFile = join(dir, 'TICKET_PROMPT.md')
   await fs.writeFile(promptFile, SAMPLE_PROMPT, 'utf-8')
-  return { dir, out: join(dir, '.qbort-run'), promptFile }
+  return { dir, out: join(dir, '.qbort-run'), output: join(dir, 'qbort-output'), promptFile }
 }
 
 export async function cleanup(run: Run): Promise<void> {
@@ -81,7 +88,7 @@ export interface PlanOptions {
 
 /** `engine.mjs plan` with the flags spelled out, so tests read as settings rather than argv. */
 export async function plan(run: Run, opts: PlanOptions): Promise<EngineResult> {
-  const args = ['plan', '--prompt', run.promptFile, '--out', run.out, '--count', String(opts.count)]
+  const args = ['plan', '--prompt', run.promptFile, '--count', String(opts.count)]
   if (opts.batchSize !== undefined) args.push('--batch-size', String(opts.batchSize))
   if (opts.staff) args.push('--staff')
   if (opts.avg !== undefined) args.push('--avg', String(opts.avg))
@@ -111,6 +118,29 @@ export async function readOutText(run: Run, name: string): Promise<string | null
 export async function writeOut(run: Run, name: string, contents: string): Promise<void> {
   await fs.mkdir(run.out, { recursive: true })
   await fs.writeFile(join(run.out, name), contents, 'utf-8')
+}
+
+/** The tickets files the run has produced, oldest first. One per `plan`, however many rounds ran. */
+export async function outputFiles(run: Run): Promise<string[]> {
+  try {
+    return (await fs.readdir(run.output)).sort()
+  } catch {
+    return []
+  }
+}
+
+/**
+ * The run's finished file, found the way a reader would rather than at a path the test picked: the
+ * newest thing in `qbort-output/`. Null when the run wrote nothing.
+ */
+export async function readOutput<T = any>(run: Run): Promise<T | null> {
+  const files = await outputFiles(run)
+  if (!files.length) return null
+  try {
+    return JSON.parse(await fs.readFile(join(run.output, files[files.length - 1]), 'utf-8')) as T
+  } catch {
+    return null
+  }
 }
 
 /** Stand in for the scenario subagent. */

@@ -10,3 +10,4 @@ coverage/
 .notes
 .plans/
 .qbort-run/
+qbort-output/

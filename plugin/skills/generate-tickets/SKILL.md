@@ -53,12 +53,17 @@ a bigger number.
 ## Step 3: plan the run
 
 ```
-node "$ENGINE" plan --prompt TICKET_PROMPT.md --out .qbort-run \
+node "$ENGINE" plan --prompt TICKET_PROMPT.md \
   --count <N> [--staff] [--avg <A>] --staff-members <M> --age-days <D>
 ```
 
-Pass `--staff` only when staff responses are enabled (add `--avg <A>` with it). The command prints a
-`SCENARIO` block naming one `PROMPT=` file and one `OUT=` file for Step 4.
+Pass `--staff` only when staff responses are enabled (add `--avg <A>` with it). There is no output
+flag: the engine always works out of `.qbort-run/` (scratch, wiped at the start of every `plan`) and
+writes the finished file into `qbort-output/` (never wiped) in the working directory.
+
+The command prints a `SCENARIO` block naming one `PROMPT=` file and one `OUT=` file for Step 4, and
+a `WILL WRITE` line with the output path this run has claimed. That path is fixed now and does not
+change for the rest of the run.
 
 ## Step 4: generate the scenario list (one subagent)
 
@@ -76,7 +81,7 @@ with this task, substituting the `PROMPT=` and `OUT=` paths from the `SCENARIO` 
 Then build the batch prompts:
 
 ```
-node "$ENGINE" batches --out .qbort-run
+node "$ENGINE" batches
 ```
 
 This validates and shuffles the list and prints a `ROUND 0` block listing one batch per line, each
@@ -115,21 +120,22 @@ as zero tickets and the top-up loop (Step 7) makes up the shortfall.
 ## Step 6: assemble
 
 ```
-node "$ENGINE" assemble --out .qbort-run --round 0
+node "$ENGINE" assemble --round 0
 ```
 
 This validates/repairs each batch, assigns ids + roles + timestamps, caps to the requested count,
-appends to the accumulator, and (re)writes `.qbort-run/tickets.json`. It prints a
-`KEPT … REQUESTED … DROPPED … SHORTFALL …` line and the final `FILE` path.
+appends to the accumulator, and (re)writes this run's file in `qbort-output/`. It prints a
+`KEPT … REQUESTED … DROPPED … SHORTFALL …` line and the `FILE` path. Every round of a run rewrites
+that same file, so a run leaves exactly one file behind no matter how many top-ups it takes.
 
 ## Step 7: top-up rounds (if short)
 
 If `SHORTFALL > 0`, run up to **3** additional rounds (round 1, 2, 3). For each round `R`:
 
 ```
-node "$ENGINE" topup --out .qbort-run --round R      # prints a ROUND R batch block
+node "$ENGINE" topup --round R      # prints a ROUND R batch block
 # → spawn that round's subagents in parallel (Step 5)
-node "$ENGINE" assemble --out .qbort-run --round R   # prints the updated SHORTFALL
+node "$ENGINE" assemble --round R   # prints the updated SHORTFALL
 ```
 
 Top-ups draw scenarios from the reserve the scenario list was over-generated with (Step 4 asks for
@@ -141,12 +147,17 @@ than requested, which is expected, not an error).
 
 ## Step 8: report
 
-Tell the user the final `tickets.json` path, the kept vs. requested count, and how many rounds ran.
-Offer to preview a few tickets (read and summarize the file) or to copy it somewhere. Do not print
-the whole file.
+Echo the **full path** from the last `assemble`'s `FILE` line back to the user, verbatim. The
+filename is timestamped, so it is different every run and the user cannot guess it. Also give the
+kept vs. requested count and how many rounds ran. Offer to preview a few tickets (read and summarize
+the file) or to copy it somewhere. Do not print the whole file.
 
 ## Notes / invariants
 
+- `plan` wipes `.qbort-run/` before it does anything else. That is deliberate (a leftover batch file
+  from an earlier run sits at exactly the path this run's subagent is meant to write, and would be
+  assembled into the output as if it were fresh), so never work around it by staging files there
+  before planning. `qbort-output/` is never touched by the wipe, so earlier runs' files survive.
 - The engine assigns `id` (sequential), `isStaff` (from the `@company.biz` domain, opener always the
   customer), and `createdAt` (ascending by id, strictly increasing within a ticket). The model is
   never trusted with these, so don't post-edit them.

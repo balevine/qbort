@@ -3,9 +3,9 @@ import { parseArgs } from '@lib/args.mjs'
 
 describe('parseArgs', () => {
   it('reads `--flag value` pairs as strings', () => {
-    expect(parseArgs(['--out', '.qbort-run', '--count', '25'])).toEqual({
+    expect(parseArgs(['--prompt', 'TICKET_PROMPT.md', '--count', '25'])).toEqual({
       _: [],
-      out: '.qbort-run',
+      prompt: 'TICKET_PROMPT.md',
       count: '25'
     })
   })

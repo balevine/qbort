@@ -29,7 +29,7 @@ function scenarioList(n: number): string[] {
   return Array.from({ length: n }, (_, i) => `scenario number ${i}`)
 }
 
-const buildBatches = () => runEngine(['batches', '--out', run.out], run.dir)
+const buildBatches = () => runEngine(['batches'], run.dir)
 
 describe('batches fails fast on an unusable scenario list', () => {
   it('NO_SCENARIOS when the subagent never wrote the file', async () => {
@@ -154,13 +154,13 @@ describe('top-up rounds draw from the reserve', () => {
     await writeScenarios(run, scenarioList(total))
     expect((await buildBatches()).code).toBe(0)
     await writeBatch(run, 0, 0, ['a', 'b']) // 2 of the 4 asked for
-    const assembled = await runEngine(['assemble', '--out', run.out, '--round', '0'], run.dir)
+    const assembled = await runEngine(['assemble', '--round', '0'], run.dir)
     expect(assembled.stdout).toContain('SHORTFALL 2')
   }
 
   it('deals fresh scenarios to the re-generated tickets', async () => {
     await shortfallOfTwo(6) // 4 dealt in round 0, 2 in reserve
-    const top = await runEngine(['topup', '--out', run.out, '--round', '1'], run.dir)
+    const top = await runEngine(['topup', '--round', '1'], run.dir)
     expect(top.code, top.stderr).toBe(0)
     expect(top.stdout).toContain('TOPUP round 1: shortfall=2, scenarios available=2')
 
@@ -173,7 +173,7 @@ describe('top-up rounds draw from the reserve', () => {
 
   it('continues without failing when the reserve has run dry', async () => {
     await shortfallOfTwo(4) // the list covered the run exactly; nothing held back
-    const top = await runEngine(['topup', '--out', run.out, '--round', '1'], run.dir)
+    const top = await runEngine(['topup', '--round', '1'], run.dir)
     // Most of the output already exists by now, so fail-fast would be the wrong trade here.
     expect(top.code, top.stderr).toBe(0)
     expect(top.stdout).toContain('TOPUP round 1: shortfall=2, scenarios available=0')
@@ -184,14 +184,14 @@ describe('top-up rounds draw from the reserve', () => {
 
     // And the round still assembles to a complete file.
     await writeBatch(run, 1, 0, ['c', 'd'])
-    const assembled = await runEngine(['assemble', '--out', run.out, '--round', '1'], run.dir)
+    const assembled = await runEngine(['assemble', '--round', '1'], run.dir)
     expect(assembled.code, assembled.stderr).toBe(0)
     expect(assembled.stdout).toContain('KEPT 4 REQUESTED 4 DROPPED 0 SHORTFALL 0')
   })
 
   it('tells the model to invent the rest when the reserve covers only part of the round', async () => {
     await shortfallOfTwo(5) // one scenario left for a two-ticket top-up
-    const top = await runEngine(['topup', '--out', run.out, '--round', '1'], run.dir)
+    const top = await runEngine(['topup', '--round', '1'], run.dir)
     expect(top.stdout).toContain('shortfall=2, scenarios available=1')
     const prompt = await readOutText(run, 'prompt-1-0.txt')
     expect(scenariosInPrompt(prompt!)).toHaveLength(1)

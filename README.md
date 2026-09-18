@@ -58,9 +58,12 @@ Every answer, including a free-typed one, is re-clamped into range before it rea
 
 ### What happens during a run
 
-The run opens with a single call that writes a list of one-line ticket scenarios (about 30% more than you asked for), which is then shuffled and dealt one per ticket. Then batches fan out in parallel, each written by its own subagent, and the engine validates, repairs, and assembles what comes back into `.qbort-run/tickets.json`. If validation drops tickets, up to 3 top-up rounds regenerate just the shortfall, drawing fresh scenarios from the surplus.
+The run opens with a single call that writes a list of one-line ticket scenarios (about 30% more than you asked for), which is then shuffled and dealt one per ticket. Then batches fan out in parallel, each written by its own subagent, and the engine validates, repairs, and assembles what comes back into a timestamped file under `qbort-output/`. If validation drops tickets, up to 3 top-up rounds regenerate just the shortfall, drawing fresh scenarios from the surplus. Every round rewrites the same file, so a run leaves exactly one behind however many rounds it takes.
 
-`.qbort-run/` is scratch: run state, the per-batch prompts, the raw subagent output, and the final file. Add it to your `.gitignore` if you don't want it tracked.
+A run uses two directories in your working directory, and adding both to your `.gitignore` is usually what you want:
+
+- **`.qbort-run/`** is scratch: run state, the per-batch prompts, and the raw subagent output. It is **wiped at the start of every run**, so don't keep anything there. The wipe is deliberate: the batch files sit at fixed names that subagents write, so a leftover file from an earlier run would otherwise be folded into the new output as though it were fresh.
+- **`qbort-output/`** holds the finished tickets files, and is never wiped. Earlier runs stay where they are.
 
 **Why a run is capped at 500 tickets.** Batches are written by separate subagents that can't see each other. Left alone, they converge on the same obvious topics and produce near-duplicate tickets, which is what the scenario list prevents. That list has to come back in a single response, and much past 500 one-liners a single response stops being reliable, so a short list fails the run rather than quietly producing duplicates at full cost. If you need more than 500, do several runs: each gets its own independent scenario list.
 
@@ -68,7 +71,7 @@ The run opens with a single call that writes a list of one-line ticket scenarios
 
 ## What you get
 
-`.qbort-run/tickets.json`, shaped like this:
+One file per run at `qbort-output/tickets-YYYYMMDD-HHMMSS.json` (the skill tells you the exact path when it finishes), shaped like this:
 
 ```jsonc
 {

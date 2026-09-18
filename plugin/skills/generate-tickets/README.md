@@ -26,13 +26,13 @@ The skill ships inside the `qbort` plugin, not as a loose folder, because it nee
 2. Create a **`TICKET_PROMPT.md`** describing what you're supporting (product context, ticket categories, and the kinds of users who file tickets). This is the creative half of the prompt. The engine-enforced output requirements (JSON schema, per-batch counts, allowed statuses, staff rules) are appended automatically at generation time. If the file is missing, the skill scaffolds a starter from `templates/TICKET_PROMPT.md` and stops so you can edit it.
 3. Invoke the skill by typing **`/qbort:generate-tickets`**. Asking in natural language ("generate some fake support tickets") does *not* trigger it: the skill sets `disable-model-invocation: true`, which keeps its description out of every session's startup context at the cost of only firing when you name it.
 4. Answer the short **settings Q&A**: ticket count, whether to include staff reply threads (and the average per ticket), staff-roster size, and how far back to spread ticket open times. Every answer is re-clamped to safe ranges.
-5. The skill generates in parallel batches and writes **`.qbort-run/tickets.json`**.
+5. The skill generates in parallel batches and writes **`qbort-output/tickets-YYYYMMDD-HHMMSS.json`**, reporting the exact path when it finishes.
 
-`.qbort-run/` is scratch (run state, per-batch prompts and outputs, the final file). Add it to `.gitignore` if you don't want it tracked.
+Two directories, both worth adding to `.gitignore`. `.qbort-run/` is scratch (run state, per-batch prompts, raw subagent output) and is **wiped at the start of every run**, because its batch files sit at fixed names that subagents write, so anything left from an earlier run would be assembled into the new output as though it were fresh. `qbort-output/` holds the finished files and is never wiped, so earlier runs stay put.
 
 ## What you get
 
-`tickets.json` matches the Qbort ticket shape: `{ meta, tickets: [{ id, subject, status, messages: [{ from, body, isStaff, createdAt }] }] }`. The engine assigns the `id` (sequential), `isStaff` (staff = `@company.biz` domain; the opener is always the customer), and `createdAt` (ascending by id, strictly increasing within a ticket, never in the future).
+The tickets file matches the Qbort ticket shape: `{ meta, tickets: [{ id, subject, status, messages: [{ from, body, isStaff, createdAt }] }] }`. The engine assigns the `id` (sequential), `isStaff` (staff = `@company.biz` domain; the opener is always the customer), and `createdAt` (ascending by id, strictly increasing within a ticket, never in the future).
 
 Its `meta.provider` is `claude-skill` and it has no `usage` block, because ambient generation isn't a metered API call and produces no token or cost numbers. That block is optional in the format, so a file without it is still valid.
 
@@ -42,11 +42,12 @@ Its `meta.provider` is `claude-skill` and it has no `usage` block, because ambie
 skill (SKILL.md drives Claude):
   ├─ ensure TICKET_PROMPT.md            (scaffold + stop if missing)
   ├─ settings Q&A                       (AskUserQuestion; re-clamped by the engine)
-  ├─ engine.mjs plan                    (roster, opening times, scenario prompt, run-context.json)
+  ├─ engine.mjs plan                    (wipe .qbort-run/, roster, opening times, scenario prompt,
+  │                                       output filename, run-context.json)
   ├─ one subagent writes scenarios.json (a one-line scenario per ticket, plus a reserve)
   ├─ engine.mjs batches                 (validate + shuffle the scenarios, deal them into batch prompts)
   ├─ fan out one subagent per batch     (parallel; each writes its raw JSON to a batch file)
-  ├─ engine.mjs assemble                (validate/repair, assign id/role/timestamps, cap, write tickets.json)
+  ├─ engine.mjs assemble                (validate/repair, assign id/role/timestamps, cap, write the output file)
   └─ top-up rounds while short          (engine.mjs topup + assemble, up to 3 extra rounds)
 ```
 

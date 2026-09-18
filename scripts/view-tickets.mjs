@@ -13,7 +13,7 @@
 //
 //   node scripts/view-tickets.mjs [file] [options]
 //
-//   file              path to a tickets.json (default: .qbort-run/tickets.json)
+//   file              path to a tickets file (default: the newest one in qbort-output/)
 //   --id <spec>       full threads for these ids: `7`, `3,9`, `10-20` (implies --full)
 //   --status <list>   keep only these statuses, comma-separated
 //   --search <text>   keep only tickets whose subject or any message body contains text
@@ -25,19 +25,35 @@
 //   --width <n>       wrap width (default: terminal width, else 100)
 //   --no-color        disable ANSI colour (already off when stdout is not a TTY)
 
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 
 import { parseArgs } from '../plugin/lib/args.mjs'
 import { readJson } from '../plugin/lib/fsUtil.mjs'
+import { OUTPUT_DIR, newestOutputName } from '../plugin/lib/paths.mjs'
 import { parseTicketFile } from '../plugin/lib/ticketFile.mjs'
 
-const DEFAULT_FILE = '.qbort-run/tickets.json'
 const DEFAULT_LIMIT = 50
 const DEFAULT_FULL_LIMIT = 5
 const FALLBACK_WIDTH = 100
 
 // ── pure helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * The newest run's output file, which is what someone typing no arguments almost always wants.
+ * Which name is newest is the engine's naming scheme to know, so that part lives in `lib/paths.mjs`.
+ * @returns {string | null} absolute path, or null when there is nothing to read
+ */
+function newestOutputPath() {
+  let names = []
+  try {
+    names = readdirSync(resolve(OUTPUT_DIR))
+  } catch {
+    return null
+  }
+  const newest = newestOutputName(names)
+  return newest === null ? null : join(resolve(OUTPUT_DIR), newest)
+}
 
 /**
  * Expand an id spec into a Set: `7`, `3,9`, `10-20`, or any comma-separated mix of those.
@@ -247,9 +263,13 @@ if (args.help || args.h) {
   process.exit(0)
 }
 
-const filePath = resolve(typeof args.file === 'string' ? args.file : (args._[0] ?? DEFAULT_FILE))
+const explicit = typeof args.file === 'string' ? args.file : args._[0]
+const filePath = explicit !== undefined ? resolve(explicit) : newestOutputPath()
+if (filePath === null) {
+  fail(`No ticket files in ${resolve(OUTPUT_DIR)}. Pass a path, or generate a run first.`)
+}
 const raw = await readJson(filePath)
-if (raw === null) fail(`Could not read ${filePath}. Pass a path, or run from a directory with ${DEFAULT_FILE}.`)
+if (raw === null) fail(`Could not read ${filePath}.`)
 const file = parseTicketFile(raw)
 if (!file) fail(`${filePath} is not a valid tickets.json (it does not match the current format).`)
 
