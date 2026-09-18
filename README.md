@@ -1,15 +1,15 @@
 # Qbort
 
-A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin that generates realistic, **fake customer support tickets**, driven by a prompt file you write and a handful of numeric settings. It's useful for seeding demos, load-testing a helpdesk UI, or producing sample data without touching real customer information.
+A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin that generates realistic, **fake customer support tickets**, driven by a prompt file you write and a handful of numeric settings. It's useful for seeding demos, testing helpdesk automations, or producing sample data without touching real customer information.
 
-There's no app to install, no API key, and no `npm install`. Ticket content is written by the Claude you're already talking to (through parallel subagents). A small, dependency-free Node engine owns everything structural (batching, validation and repair, sequential ids, staff/customer roles, and synthesized timestamps) and writes a `tickets.json`.
+There's no app to install, no API key, and no `npm install`. Ticket content is written within your local installation of Claude Code (through parallel subagents). A small, dependency-free Node engine owns everything structural (batching, validation and repair, sequential ids, staff/customer roles, and synthesized timestamps) and writes a `tickets.json` file.
 
 **Highlights**
 
 - Install as a plugin, invoke with `/qbort:generate-tickets`, answer four questions, get a file.
-- The creative half of the prompt is **yours**: a `TICKET_PROMPT.md` in your working directory describing your product, your categories, and the people who file tickets.
+- The creative half of the prompt is **yours**: a `TICKET_PROMPT.md` file in your working directory describing your product, your ticket categories, and the people who file tickets.
 - Every ticket gets its own one-line scenario off a globally-visible list, so batches can't converge on the same handful of topics.
-- Output is a self-describing `tickets.json` with full conversation threads (`{ id, subject, status, messages: [...] }`).
+- Output is a single `tickets.json` file with full conversation threads (`{ id, subject, status, messages: [...] }`).
 
 ---
 
@@ -32,13 +32,13 @@ That registers the `generate-tickets` skill and the restricted `ticket-batch` ag
 ## Usage
 
 1. `cd` into the directory where you want the output. The plugin reads and writes there.
-2. Type **`/qbort:generate-tickets`**.
+2. Type `/qbort:generate-tickets`.
 
 Asking in natural language ("generate some fake support tickets") does **not** trigger it. The skill sets `disable-model-invocation: true`, which keeps its description out of every session's startup context at the cost of only firing when you name it.
 
 ### The prompt file
 
-If there's no **`TICKET_PROMPT.md`** in your working directory, the first run scaffolds a starter one and generates from it, so you can see what the pipeline produces without writing anything first. The starter is generic, though, so edit it and run again to get tickets about your own product. This file is the creative and distribution half of the prompt: what your product is, who files tickets about it, the categories and roughly what share of tickets each should get, the tone, and anything else that shapes the content.
+If there's no **`TICKET_PROMPT.md`** file in your working directory, the first run scaffolds a starter one and generates from it, so you can see what the pipeline produces without writing anything first. The starter is generic, though, so edit it and run again to get tickets about your own product. This file is the creative and distribution half of the prompt: what your product is, who files tickets about it, the ticket categories and roughly what share of tickets each should get, the tone, and anything else that shapes the content.
 
 The engine appends its own output requirements below a clear delimiter: the exact JSON shape, the per-batch count, the allowed statuses, the staff roster, and the per-ticket reply targets. Your text is never overridden. Every compiled prompt is a plain file at `.qbort-run/prompt-<round>-<batch>.txt` if you want to read exactly what a subagent was sent.
 
@@ -60,7 +60,7 @@ Every answer, including a free-typed one, is re-clamped into range before it rea
 
 The run opens with a single call that writes a list of one-line ticket scenarios (about 30% more than you asked for), which is then shuffled and dealt one per ticket. Then batches fan out in parallel, each written by its own subagent, and the engine validates, repairs, and assembles what comes back into a timestamped file under `qbort-output/`. If validation drops tickets, up to 3 top-up rounds regenerate just the shortfall, drawing fresh scenarios from the surplus. Every round rewrites the same file, so a run leaves exactly one behind however many rounds it takes.
 
-A run uses two directories in your working directory, and adding both to your `.gitignore` is usually what you want:
+A run uses two directories in your working directory, and adding both to your `.gitignore` file is usually what you want:
 
 - **`.qbort-run/`** is scratch: run state, the per-batch prompts, and the raw subagent output. It is **wiped at the start of every run**, so don't keep anything there. The wipe is deliberate: the batch files sit at fixed names that subagents write, so a leftover file from an earlier run would otherwise be folded into the new output as though it were fresh.
 - **`qbort-output/`** holds the finished tickets files, and is never wiped. Earlier runs stay where they are.
@@ -69,7 +69,7 @@ A run uses two directories in your working directory, and adding both to your `.
 
 ---
 
-## What you get
+## Output format
 
 One file per run at `qbort-output/tickets-YYYYMMDD-HHMMSS.json` (the skill tells you the exact path when it finishes), shaped like this:
 
