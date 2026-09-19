@@ -12,12 +12,14 @@ A **Claude Code plugin** that generates fake customer support tickets. The user 
 
 ## Structure & the engine/model boundary
 
-- `plugin/lib/*.mjs`: **the logic**, one copy, dependency-free ESM on bare `node`. `args`, `constants`, `fsUtil` (`atomicWriteJson`/`atomicWriteText`/`readJson`/`readText`), `paths` (the two directory names + the timestamped output filename), `promptCompiler`, `scratch` (`clearScratch`), `settings` (`LIMITS`/`clampGeneration`), `staff` (roster + Poisson sampler), `ticketFile` (the `tickets.json` format), `time`, `types` (JSDoc typedefs), `validate` (repair/drop + id/role/timestamp assignment), `version` (reads the plugin manifest).
+- `plugin/lib/*.mjs`: **the logic**, one copy, dependency-free ESM on bare `node`. `args`, `constants`, `fsUtil` (`atomicWriteJson`/`atomicWriteText`/`readJson`/`readText`), `paths` (the two directory names + the timestamped output filename), `pipeline` (`splitBatches`/`shuffled`/`buildRound`), `promptCompiler`, `scratch` (`clearScratch`), `settings` (`LIMITS`/`clampGeneration`), `staff` (roster + Poisson sampler), `ticketFile` (the `tickets.json` format), `time`, `types` (JSDoc typedefs), `validate` (repair/drop + id/role/timestamp assignment), `version` (reads the plugin manifest), `viewer` (`newestOutputPath`/`parseIdSpec`/`selectTickets`/`summarize`/rendering).
 - `plugin/skills/generate-tickets/engine.mjs`: the CLI (`plan | batches | topup | assemble`). **Orchestration only.**
 - `plugin/skills/generate-tickets/SKILL.md`: instructions Claude follows. The only thing that can spawn a subagent, which is the only way a model gets called.
 - `plugin/agents/ticket-batch.md`: the restricted (`Read`/`Write` only) batch agent, registered namespaced as `qbort:ticket-batch`.
-- `test/`: vitest, in TypeScript, importing `plugin/lib` through the `@lib/*` alias.
-- `scripts/`: repo-local dev tools, outside the shipped plugin. `view-tickets.mjs` reads a tickets file in the terminal (list, thread, filter, `--stats`), defaulting to the newest run in `qbort-output/` and loading it through `lib/ticketFile.mjs` so the viewer and the writer agree on the format. Nothing under `plugin/` imports it.
+- `plugin/mcp/server.mjs`: the **MCP server**, exposing tools, resources, and prompts over stdio JSON-RPC. Allows any MCP host (Cursor, Claude Desktop, Antigravity, Windsurf, Claude Code via MCP) to plan, generate, inspect, and analyze ticket datasets with zero external runtime dependencies.
+- `test/`: vitest, in TypeScript, importing `plugin/lib` through the `@lib/*` alias and `plugin/mcp` through `@mcp/*`.
+- `scripts/`: repo-local dev tools, outside the shipped plugin. `view-tickets.mjs` reads a tickets file in the terminal (list, thread, filter, `--stats`), defaulting to the newest run in `qbort-output/` and loading it through `lib/ticketFile.mjs` and `lib/viewer.mjs`. Nothing under `plugin/` imports it.
+
 
 **Hard rule:** the engine owns structure, the model owns content. `id` (sequential int), `isStaff` (from the `@company.biz` domain, opener always the customer), and `createdAt` (synthesized, ascending by id, strictly increasing within a ticket) are assigned by the engine and never trusted from the model. Ticket shape: `{ id, subject, status, messages: [{ from, body, isStaff, createdAt }] }` (opening message is `messages[0]`). That shape is frozen, so files from older runs still load in the viewers that read them. The engine never touches the network and has no credentials.
 

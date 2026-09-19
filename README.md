@@ -105,7 +105,59 @@ The file is just JSON, so `jq` it, load it into your own fixtures, or open it in
 
 ---
 
+## MCP Server
+
+In addition to the Claude Code plugin skill, Qbort includes a standalone **Model Context Protocol (MCP)** server (`plugin/mcp/server.mjs`). This allows any MCP-capable host (Claude Desktop, Cursor, Windsurf, Antigravity, or Claude Code via MCP) to plan, generate, inspect, and analyze ticket datasets with zero external runtime dependencies on bare Node.js 20+.
+
+### Client configuration
+
+**Claude Code plugin:** Installing the plugin registers the MCP server automatically via `plugin/.mcp.json`.
+
+**Cursor / Windsurf (`.mcp.json` or `.cursor/mcp.json`):**
+```json
+{
+  "mcpServers": {
+    "qbort": {
+      "command": "node",
+      "args": ["./plugin/mcp/server.mjs"]
+    }
+  }
+}
+```
+
+**Claude Desktop (`claude_desktop_config.json`):**
+```json
+{
+  "mcpServers": {
+    "qbort": {
+      "command": "node",
+      "args": ["<path-to-qbort>/plugin/mcp/server.mjs"]
+    }
+  }
+}
+```
+
+### Tools
+
+- `scaffold_ticket_prompt`: Creates starter `TICKET_PROMPT.md` in the working directory if one does not exist yet.
+- `plan_ticket_run`: Wipes scratch, clamps settings, creates staff roster, draws opening times, and compiles scenario prompt.
+- `build_ticket_batches`: Validates and shuffles scenarios, deals one scenario per ticket, and compiles per-batch prompts.
+- `assemble_tickets`: Validates and repairs tickets, assigns sequential IDs and synthesized timestamps, and writes `qbort-output/tickets-*.json`.
+- `prepare_topup`: Prepares top-up batches drawing from the scenario reserve if validation drops any tickets.
+- `list_ticket_runs`: Lists all generated ticket runs in `qbort-output/` with summary metadata.
+- `get_run_stats`: Calculates breakdown by status, message counts, staff replies, and date span.
+- `view_tickets`: Searches, filters by status or ID range, and paginates tickets from a run.
+- `get_ticket`: Retrieves the complete message thread for a single ticket ID.
+
+### Resources & Prompts
+
+- **Resources:** `qbort://template/ticket-prompt` (starter prompt template), `qbort://runs/latest` (latest run output JSON), and `qbort://runs/latest/stats` (latest run statistics).
+- **Prompts:** `generate-tickets` (guided ticket generation workflow) and `review-tickets` (guided review and quality analysis of generated datasets).
+
+---
+
 ## Contributing
+
 
 Contributions are welcome, but please note:
 

@@ -17,8 +17,9 @@
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
-      "@lib/*": ["plugin/lib/*"]
+      "@lib/*": ["plugin/lib/*"],
+      "@mcp/*": ["plugin/mcp/*"]
     }
   },
-  "include": ["test/**/*.ts", "plugin/lib/**/*.mjs"]
+  "include": ["test/**/*.ts", "plugin/lib/**/*.mjs", "plugin/mcp/**/*.mjs"]
 }

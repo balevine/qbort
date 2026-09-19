@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "qbort": {
+      "command": "node",
+      "args": ["./plugin/mcp/server.mjs"]
+    }
+  }
+}

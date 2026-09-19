@@ -10,7 +10,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@lib': resolve(__dirname, 'plugin/lib')
+      '@lib': resolve(__dirname, 'plugin/lib'),
+      '@mcp': resolve(__dirname, 'plugin/mcp')
     }
   }
 })

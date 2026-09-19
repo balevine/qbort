@@ -39,63 +39,16 @@ import { DEFAULT_BATCH_SIZE } from '../../lib/constants.mjs'
 import { OUTPUT_DIR, SCRATCH_DIR, outputFileName } from '../../lib/paths.mjs'
 import { clearScratch } from '../../lib/scratch.mjs'
 import { pluginVersion } from '../../lib/version.mjs'
+import { splitBatches, shuffled, buildRound as pipelineBuildRound } from '../../lib/pipeline.mjs'
 
 /** Every subcommand works out of the same two directories. No caller ever supplies a path. */
 const scratchDir = resolve(SCRATCH_DIR)
 const outputDir = resolve(OUTPUT_DIR)
 
-function splitBatches(count, batchSize) {
-  const specs = []
-  for (let start = 0; start < count; start += batchSize) {
-    specs.push(Math.min(batchSize, count - start))
-  }
-  return specs
+function buildRound(ctx, round, count) {
+  return pipelineBuildRound(ctx, round, count, scratchDir)
 }
 
-// Fisher-Yates over a copy.
-function shuffled(list, rng = Math.random) {
-  const out = list.slice()
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1))
-    ;[out[i], out[j]] = [out[j], out[i]]
-  }
-  return out
-}
-
-// Compile prompt files for a round and write its manifest. Shared by `batches` and `topup`.
-// Deals scenarios off the context's list, advancing `scenarioCursor` as batches are built. A round
-// that outruns the reserve simply gets fewer scenarios than tickets (see cmdTopup).
-async function buildRound(ctx, round, count) {
-  const gen = ctx.settings
-  if (typeof ctx.scenarioCursor !== 'number') ctx.scenarioCursor = 0
-  const specs = splitBatches(count, ctx.batchSize)
-  const batches = []
-  for (const [index, batchCount] of specs.entries()) {
-    const responseCounts = gen.includeStaffResponses
-      ? sampleResponseCounts(batchCount, gen.avgStaffResponses)
-      : undefined
-    const scenarios = (ctx.scenarios ?? []).slice(ctx.scenarioCursor, ctx.scenarioCursor + batchCount)
-    ctx.scenarioCursor += scenarios.length
-    const { dynamic } = compilePromptParts({
-      editablePrompt: ctx.prompt,
-      batchCount,
-      scenarios,
-      staff: {
-        include: gen.includeStaffResponses,
-        avgResponses: gen.avgStaffResponses,
-        roster: ctx.roster,
-        responseCounts
-      }
-    })
-    const promptFile = join(scratchDir, `prompt-${round}-${index}.txt`)
-    const batchFile = join(scratchDir, `batch-${round}-${index}.json`)
-    await atomicWriteText(promptFile, `${ctx.staticPrefix}\n\n${dynamic}\n`)
-    batches.push({ index, count: batchCount, promptFile, batchFile })
-  }
-  const manifest = { round, batches }
-  await atomicWriteJson(join(scratchDir, `round-${round}.json`), manifest)
-  return manifest
-}
 
 function printRound(manifest) {
   console.log(`ROUND ${manifest.round}: ${manifest.batches.length} batch(es) to generate.`)

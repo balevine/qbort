@@ -82,18 +82,28 @@ export function repairTicket(raw, opts) {
   if (!raw || typeof raw !== 'object') return null
   const t = raw
 
+  // Adapt {messages: [...]} if body/from were provided as message array
+  let openingInput = { body: t.body, from: t.from }
+  let rawResponses = Array.isArray(t.responses) ? t.responses : []
+  if ((!t.body || !t.from) && Array.isArray(t.messages) && t.messages.length > 0) {
+    openingInput = { body: t.messages[0]?.body, from: t.messages[0]?.from }
+    if (!t.responses) {
+      rawResponses = t.messages.slice(1)
+    }
+  }
+
   // The opening message is the customer's, and a ticket needs its content + an author. Its role is
   // fixed to customer regardless of the email domain (the engine never trusts the model for role).
-  const opening = repairMessage({ body: t.body, from: t.from })
+  const opening = repairMessage(openingInput)
   if (!opening) return null
   opening.isStaff = false
 
   const subject = String(t.subject ?? '').trim() || opening.body.split('\n')[0].slice(0, 80) || '(no subject)'
 
-  const rawResponses = Array.isArray(t.responses) ? t.responses : []
   const replies = opts.includeStaffResponses
     ? rawResponses.map(repairMessage).filter((m) => m !== null)
     : []
+
 
   return { subject, status: coerceStatus(t.status), messages: [opening, ...replies] }
 }

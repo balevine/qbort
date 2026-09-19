@@ -9,6 +9,24 @@ import { dirname } from 'node:path'
 /** Monotonic counter so overlapping writes never share a temp filename. */
 let writeSeq = 0
 
+async function renameWithRetry(src, dest, maxRetries = 10) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      await fs.rename(src, dest)
+      return
+    } catch (err) {
+      if (
+        attempt < maxRetries - 1 &&
+        (err.code === 'EPERM' || err.code === 'EACCES' || err.code === 'EBUSY')
+      ) {
+        await new Promise((r) => setTimeout(r, 5 * (attempt + 1)))
+        continue
+      }
+      throw err
+    }
+  }
+}
+
 /**
  * Atomically write `contents` to `filePath`.
  * @param {string} filePath
@@ -19,8 +37,9 @@ export async function atomicWriteText(filePath, contents) {
   await fs.mkdir(dirname(filePath), { recursive: true })
   const tmp = `${filePath}.${process.pid}.${writeSeq++}.tmp`
   await fs.writeFile(tmp, contents, 'utf-8')
-  await fs.rename(tmp, filePath)
+  await renameWithRetry(tmp, filePath)
 }
+
 
 /**
  * Atomically write a value as pretty (2-space) JSON.
